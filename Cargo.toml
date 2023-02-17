@@ -1,0 +1,11 @@
+[package]
+name = "bfv"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+num-bigint-dig = {version = "0.8.2", features = ["prime"]}
+fhe-math = { path = "../fhe.rs/crates/fhe-math"   }
+rand = "0.8.5"
