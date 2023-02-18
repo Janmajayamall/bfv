@@ -9,3 +9,7 @@ edition = "2021"
 num-bigint-dig = {version = "0.8.2", features = ["prime"]}
 fhe-math = { path = "../fhe.rs/crates/fhe-math"   }
 rand = "0.8.5"
+ndarray = "0.15.6"
+itertools = "0.10.5"
+num-bigint = "0.4.3"
+num-traits = "0.2.15"

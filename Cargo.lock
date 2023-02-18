@@ -13,7 +13,11 @@ name = "bfv"
 version = "0.1.0"
 dependencies = [
  "fhe-math",
+ "itertools",
+ "ndarray",
+ "num-bigint",
  "num-bigint-dig",
+ "num-traits",
  "rand",
 ]
 

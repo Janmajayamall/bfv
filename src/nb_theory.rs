@@ -3,7 +3,7 @@ use num_bigint_dig::{prime::probably_prime, BigUint};
 use rand::{thread_rng, Rng};
 
 /// Finds prime such that prime % 2 * n == 1
-fn generate_prime(num_bits: usize, modulo: u64, upper_bound: u64) -> Option<u64> {
+pub fn generate_prime(num_bits: usize, modulo: u64, upper_bound: u64) -> Option<u64> {
     let leading_zeros = (64 - num_bits) as u32;
 
     let mut tentative_prime = upper_bound - 1;
@@ -28,7 +28,7 @@ fn generate_prime(num_bits: usize, modulo: u64, upper_bound: u64) -> Option<u64>
 }
 
 // Finds 2n_th primitive root of unity in field mod p
-fn primitive_element(p: u64, n: usize) -> Option<u64> {
+pub fn primitive_element(p: u64, n: usize) -> Option<u64> {
     let mut rng = thread_rng();
     let p = Modulus::new(p).unwrap();
     let m = (n as u64) * 2;
@@ -44,3 +44,5 @@ fn primitive_element(p: u64, n: usize) -> Option<u64> {
     }
     None
 }
+
+//TODO: write tests for the above functions
