@@ -23,7 +23,7 @@ pub enum Representation {
 /// 4.
 #[derive(Clone, Debug)]
 pub struct PolyContext {
-    moduli: Box<[u64]>,
+    pub moduli: Box<[u64]>,
     moduli_ops: Box<[Modulus]>,
     ntt_ops: Box<[NttOperator]>,
     degree: usize,

@@ -54,7 +54,6 @@ impl BfvParameters {
         }
 
         // ENCRYPTION //
-
         let mut q_modt = vec![];
         let mut neg_t_inv_modql = vec![];
         poly_contexts.iter().for_each(|poly_context| {
@@ -80,6 +79,62 @@ impl BfvParameters {
             );
             neg_t_inv_modq.change_representation(Representation::Evaluation);
             neg_t_inv_modql.push(neg_t_inv_modq);
+        });
+
+        // DECRYPTION //
+        // Pre computation for decryption
+        let b = 30;
+        let mut t_qlhat_inv_modql_divql_modt = vec![];
+        let mut t_bqlhat_inv_modql_divql_modt = vec![];
+        let mut t_qlhat_inv_modql_divql_frac = vec![];
+        let mut t_bqlhat_inv_modql_divql_frac = vec![];
+        poly_contexts.iter().for_each(|poly_context| {
+            let ql = poly_context.modulus();
+            let ql_dig = poly_context.modulus_dig();
+
+            let mut rationals = vec![];
+            let mut brationals = vec![];
+            let mut fractionals = vec![];
+            let mut bfractionals = vec![];
+
+            poly_context.moduli.iter().for_each(|qi| {
+                // [qihat_inv]_qi
+                let qihat_inv = BigUint::from_bytes_le(
+                    &(&ql_dig / qi)
+                        .mod_inverse(BigUintDig::from(*qi))
+                        .unwrap()
+                        .to_biguint()
+                        .unwrap()
+                        .to_bytes_le(),
+                );
+
+                // [round((t * qihat_inv_modq) / qi)]_t
+                let rational = (((&qihat_inv * plaintext_modulus) / qi) % plaintext_modulus)
+                    .to_u64()
+                    .unwrap();
+                let brational = (((((&qihat_inv * (1u64 << b)) % qi) * plaintext_modulus) / qi)
+                    % plaintext_modulus)
+                    .to_u64()
+                    .unwrap();
+
+                // ((t * qihat_inv_modqi) % qi) / qi
+                let fractional = ((&qihat_inv * plaintext_modulus) % qi).to_f64().unwrap()
+                    / qi.to_f64().unwrap();
+                let bfractional = ((((&qihat_inv * (1u64 << b)) % qi) * plaintext_modulus) % qi)
+                    .to_f64()
+                    .unwrap()
+                    / qi.to_f64().unwrap();
+
+                rationals.push(rational);
+                brationals.push(brational);
+                fractionals.push(fractional);
+                bfractionals.push(bfractional);
+            });
+
+            t_qlhat_inv_modql_divql_modt.push(rationals);
+            t_bqlhat_inv_modql_divql_modt.push(brationals);
+            t_qlhat_inv_modql_divql_frac.push(fractionals);
+            t_bqlhat_inv_modql_divql_frac.push(bfractionals)
         });
 
         todo!()
