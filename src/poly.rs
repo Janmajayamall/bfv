@@ -1,16 +1,17 @@
 use fhe_math::zq::{ntt::NttOperator, Modulus};
-use itertools::{izip, Itertools};
+use fhe_util::sample_vec_cbd;
+use itertools::{izip, DedupBy, Itertools};
 use ndarray::{Array2, Axis};
 use num_bigint::{BigInt, BigUint};
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{identities::One, ToPrimitive, Zero};
 use rand::{CryptoRng, RngCore};
 use std::{
-    ops::{Add, AddAssign, Sub, SubAssign},
+    ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
     sync::Arc,
 };
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Eq)]
 pub enum Representation {
     Evaluation,
     Coefficient,
@@ -22,7 +23,7 @@ pub enum Representation {
 /// 3. ntt structs for each moduli to perform ntt operations
 /// 4. q_hats and q_hat_invs
 ///
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PolyContext {
     pub moduli: Box<[u64]>,
     moduli_ops: Box<[Modulus]>,
@@ -94,16 +95,16 @@ impl PolyContext {
 
 /// Should only be concerned with polynomial operations.
 /// This mean don't store any BFV related pre-computation here
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Poly {
-    coefficients: Array2<u64>,
-    representation: Representation,
-    context: Arc<PolyContext>,
+    pub coefficients: Array2<u64>,
+    pub representation: Representation,
+    pub context: Arc<PolyContext>,
 }
 
 impl Poly {
     /// Creates zero polynomial with a given context and representation
-    fn zero(poly_context: &Arc<PolyContext>, representation: &Representation) -> Poly {
+    pub fn zero(poly_context: &Arc<PolyContext>, representation: &Representation) -> Poly {
         Poly {
             coefficients: Array2::zeros((poly_context.moduli.len(), poly_context.degree)),
             representation: representation.clone(),
@@ -112,7 +113,7 @@ impl Poly {
     }
 
     /// Creates a polynomial with random values for given context and representation
-    fn random<R: RngCore + CryptoRng>(
+    pub fn random<R: RngCore + CryptoRng>(
         poly_context: &Arc<PolyContext>,
         representation: &Representation,
         rng: &mut R,
@@ -132,12 +133,14 @@ impl Poly {
     }
 
     /// Creates a polynomial with random values sampled from gaussian distribution with given variance
-    fn random_gaussian(
+    pub fn random_gaussian<R: CryptoRng + RngCore>(
         poly_context: &Arc<PolyContext>,
-        representation: Representation,
+        representation: &Representation,
         variance: usize,
-    ) {
-        todo!()
+        rng: &mut R,
+    ) -> Poly {
+        let v = sample_vec_cbd(poly_context.degree, variance, rng).unwrap();
+        Poly::try_convert_from_i64(&v, poly_context, representation)
     }
 
     /// Changes representation of the polynomial to `to` representation
@@ -151,6 +154,7 @@ impl Poly {
                 .for_each(|(mut coefficients, ntt)| {
                     ntt.backward(coefficients.as_slice_mut().unwrap())
                 });
+                self.representation = Representation::Coefficient;
             } else {
             }
         } else if self.representation == Representation::Coefficient {
@@ -162,6 +166,7 @@ impl Poly {
                 .for_each(|(mut coefficients, ntt)| {
                     ntt.forward(coefficients.as_slice_mut().unwrap())
                 });
+                self.representation = Representation::Evaluation;
             } else {
             }
         } else {
@@ -170,7 +175,7 @@ impl Poly {
 
     //TODO: add rest of the operations needed to scale, switch context, and other necessary ops required for bfv.
     pub fn scale_and_round_decryption(
-        &mut self,
+        &self,
         t: &Modulus,
         b: usize,
         t_qhat_inv_modq_divq_modt: &[u64],
@@ -178,6 +183,8 @@ impl Poly {
         t_qhat_inv_modq_divq_frac: &[f64],
         t_bqhat_inv_modq_divq_frac: &[f64],
     ) -> Vec<u64> {
+        assert!(self.representation == Representation::Coefficient);
+
         let t_f64 = t.p.to_f64().unwrap();
         let t_inv = 1.0 / t_f64;
 
@@ -220,6 +227,8 @@ impl Poly {
 
 impl AddAssign<&Poly> for Poly {
     fn add_assign(&mut self, rhs: &Poly) {
+        // Note: Use debug_assert instead of assert since it takes significantly longer trick of just checking arc pointers in stack fails.
+        debug_assert!(self.context == rhs.context);
         izip!(
             self.coefficients.outer_iter_mut(),
             rhs.coefficients.outer_iter(),
@@ -240,6 +249,7 @@ impl Add<&Poly> for &Poly {
 
 impl SubAssign<&Poly> for Poly {
     fn sub_assign(&mut self, rhs: &Poly) {
+        debug_assert!(self.context == rhs.context);
         izip!(
             self.coefficients.outer_iter_mut(),
             rhs.coefficients.outer_iter(),
@@ -258,11 +268,57 @@ impl Sub<&Poly> for &Poly {
     }
 }
 
+impl MulAssign<&Poly> for Poly {
+    fn mul_assign(&mut self, rhs: &Poly) {
+        debug_assert!(self.context == rhs.context);
+
+        assert!(self.representation == rhs.representation);
+        assert!(self.representation == Representation::Evaluation);
+
+        izip!(
+            self.coefficients.outer_iter_mut(),
+            rhs.coefficients.outer_iter(),
+            self.context.moduli_ops.iter()
+        )
+        .for_each(|(mut p, p2, qi)| {
+            qi.mul_vec(p.as_slice_mut().unwrap(), p2.as_slice().unwrap());
+        });
+    }
+}
+
+impl Mul<&Poly> for &Poly {
+    type Output = Poly;
+    fn mul(self, rhs: &Poly) -> Self::Output {
+        let mut lhs = self.clone();
+        lhs *= rhs;
+        lhs
+    }
+}
+
 //TODO: Implement conversion using trait. Below method is ugly.
 impl Poly {
-    /// Constructs a polynomial with given BigUint values. It simply reduces any BigUint coefficient by each modulus in poly_context and assumes the specified representation.
+    pub fn try_convert_from_u64(
+        values: &[u64],
+        poly_context: &Arc<PolyContext>,
+        representation: &Representation,
+    ) -> Poly {
+        assert!(values.len() == poly_context.degree);
+        let mut p = Poly::zero(poly_context, representation);
+        izip!(
+            p.coefficients.outer_iter_mut(),
+            poly_context.moduli_ops.iter()
+        )
+        .for_each(|(mut qi_values, qi)| {
+            let mut xi = values.to_vec();
+            qi.reduce_vec(&mut xi);
+            qi_values.as_slice_mut().unwrap().copy_from_slice(&xi);
+        });
+        p
+    }
+
+    /// Constructs a polynomial with given BigUint values. It simply reduces each BigUint coefficient by every modulus in poly_context and assumes the specified representation.
     ///
-    /// values length should be smaller than or equal to poly_context degree. Values after index > polynomial degree are ignored.
+    /// values length should be smaller than or equal to poly_context degree. Values at index beyond polynomial degree are ignored.
     pub fn try_convert_from_biguint(
         values: &[BigUint],
         poly_context: &Arc<PolyContext>,
@@ -280,6 +336,29 @@ impl Poly {
         );
 
         poly
+    }
+
+    /// Constructs a polynomial with given i32 values and assumes the given representation.  
+    ///
+    /// Panics if length of values is not equal to polynomial degree
+    pub fn try_convert_from_i64(
+        values: &[i64],
+        poly_context: &Arc<PolyContext>,
+        representation: &Representation,
+    ) -> Poly {
+        assert!(values.len() == poly_context.degree);
+        let mut p = Poly::zero(poly_context, representation);
+        izip!(
+            p.coefficients.outer_iter_mut(),
+            poly_context.moduli_ops.iter()
+        )
+        .for_each(|(mut qi_values, qi)| {
+            qi_values
+                .as_slice_mut()
+                .unwrap()
+                .copy_from_slice(qi.reduce_vec_i64(values).as_slice());
+        });
+        p
     }
 }
 
