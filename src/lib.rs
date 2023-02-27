@@ -1,5 +1,5 @@
 use fhe_math::zq::Modulus;
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use nb_theory::generate_prime;
 use ndarray::MathCell;
 use num_bigint::BigUint;
@@ -42,6 +42,22 @@ struct BfvParameters {
 }
 
 impl BfvParameters {
+    /// Noise of fresh ciphertext
+    pub fn v_norm(sigma: f64, n: usize) -> f64 {
+        let alpha: f64 = 36.0;
+
+        // Bound of secret key. We set it to 1 since secret key coefficients are sampled from ternary distribution
+        let bound_key = 1.0;
+
+        // Bound of error. Error is sampled from gaussian distribution
+        let bound_error = alpha.sqrt() * sigma;
+
+        // expansion factor delta
+        let delta = 2.0 * (n as f64).sqrt();
+
+        (bound_error * (1.0 + 2.0 * delta * bound_key)).log2()
+    }
+
     /// creates new bfv parameteres with necessary values
     pub fn new(
         ciphertext_moduli_sizes: &[usize],
@@ -317,6 +333,33 @@ impl SecretKey {
             encoding: None,
         }
     }
+
+    pub fn measure_noise<R: CryptoRng + RngCore>(&self, ct: &Ciphertext, rng: &mut R) -> u64 {
+        // TODO: replace default simd with encoding used for ciphertext. This will require
+        // adding encoding info to ciphertext
+        let m = self.decrypt(ct).decode(Encoding::simd(ct.level));
+        let m = Plaintext::encode(&m, &ct.params, Encoding::simd(ct.level)).to_poly();
+
+        let mut m2 = ct.c[0].clone();
+        let s = self.to_poly(ct.level);
+        let mut s_carry = s.clone();
+        for i in 1..ct.c.len() {
+            m2 += &(&s_carry * &ct.c[i]);
+            s_carry *= &s;
+        }
+
+        m2 -= &m;
+        m2.change_representation(Representation::Coefficient);
+
+        let mut noise = 0u64;
+        Vec::<BigUint>::from(&m2).iter().for_each(|v| {
+            noise = std::cmp::max(
+                noise,
+                std::cmp::min(v.bits(), (ct.c[0].context.modulus() - v).bits()),
+            )
+        });
+        noise
+    }
 }
 
 #[derive(PartialEq, Clone)]
@@ -436,8 +479,16 @@ mod tests {
             .collect_vec();
         let pt = Plaintext::encode(&m, &params, Encoding::simd(0));
         let ct = sk.encrypt(&pt, &mut rng);
+
+        dbg!(sk.measure_noise(&ct, &mut rng));
+
         let pt2 = sk.decrypt(&ct);
         let m2 = pt2.decode(Encoding::simd(0));
         assert_eq!(m, m2);
+    }
+
+    #[test]
+    fn trial() {
+        dbg!(BfvParameters::v_norm(3.2, 8));
     }
 }
