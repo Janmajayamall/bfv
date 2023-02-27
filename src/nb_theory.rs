@@ -2,7 +2,7 @@ use fhe_math::zq::Modulus;
 use num_bigint_dig::{prime::probably_prime, BigUint};
 use rand::{thread_rng, Rng};
 
-/// Finds prime such that prime % 2 * n == 1
+/// Finds prime such that prime % n == 1
 pub fn generate_prime(num_bits: usize, modulo: u64, upper_bound: u64) -> Option<u64> {
     let leading_zeros = (64 - num_bits) as u32;
 

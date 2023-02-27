@@ -14,7 +14,24 @@ mod poly;
 /// 1. Poly Contexts of all levels
 /// 2. pre-computations at all level
 /// 3.
-struct BfvParameters {}
+struct BfvParameters {
+    ciphertext_moduli: Vec<u64>,
+    ciphertext_moduli_sizes: Vec<usize>,
+    pub ciphertext_poly_contexts: Vec<Arc<PolyContext>>,
+
+    pub plaintext_modulus: u64,
+
+    // Encryption
+    ql_modt: Vec<u64>,
+    neg_t_inv_modql: Vec<Poly>,
+
+    // Decryption
+    pub t_qlhat_inv_modql_divql_modt: Vec<Vec<u64>>,
+    pub t_bqlhat_inv_modql_divql_modt: Vec<Vec<u64>>,
+    pub t_qlhat_inv_modql_divql_frac: Vec<Vec<f64>>,
+    pub t_bqlhat_inv_modql_divql_frac: Vec<Vec<f64>>,
+    pub max_bit_size_by2: usize,
+}
 
 impl BfvParameters {
     /// creates new bfv parameteres with necessary values
@@ -24,13 +41,15 @@ impl BfvParameters {
         polynomial_degree: usize,
     ) -> BfvParameters {
         // generate primes
-        let mut moduli = vec![];
+        let mut ciphertext_moduli = vec![];
         ciphertext_moduli_sizes.iter().for_each(|size| {
             let mut upper_bound = 1u64 << size;
             loop {
-                if let Some(prime) = generate_prime(*size, polynomial_degree as u64, upper_bound) {
-                    if !moduli.contains(&prime) {
-                        moduli.push(prime);
+                if let Some(prime) =
+                    generate_prime(*size, 2 * polynomial_degree as u64, upper_bound)
+                {
+                    if !ciphertext_moduli.contains(&prime) {
+                        ciphertext_moduli.push(prime);
                         break;
                     } else {
                         upper_bound = prime;
@@ -43,10 +62,10 @@ impl BfvParameters {
         });
 
         // create contexts for all levels
-        let moduli_count = moduli.len();
+        let moduli_count = ciphertext_moduli.len();
         let mut poly_contexts = vec![];
         for i in 0..moduli_count {
-            let moduli_at_level = moduli[..moduli_count - i].to_vec();
+            let moduli_at_level = ciphertext_moduli[..moduli_count - i].to_vec();
             poly_contexts.push(Arc::new(PolyContext::new(
                 moduli_at_level.as_slice(),
                 polynomial_degree,
@@ -54,14 +73,14 @@ impl BfvParameters {
         }
 
         // ENCRYPTION //
-        let mut q_modt = vec![];
+        let mut ql_modt = vec![];
         let mut neg_t_inv_modql = vec![];
         poly_contexts.iter().for_each(|poly_context| {
             let q = poly_context.modulus();
             let q_dig = poly_context.modulus_dig();
 
             // [Q * t]_t
-            q_modt.push((q % plaintext_modulus).to_u64().unwrap());
+            ql_modt.push((q % plaintext_modulus).to_u64().unwrap());
 
             // [(-t)^-1]_Q
             let neg_t_inv_modq = BigUint::from_bytes_le(
@@ -83,7 +102,7 @@ impl BfvParameters {
 
         // DECRYPTION //
         // Pre computation for decryption
-        let b = 30;
+        let b = ciphertext_moduli_sizes.iter().max().unwrap() / 2;
         let mut t_qlhat_inv_modql_divql_modt = vec![];
         let mut t_bqlhat_inv_modql_divql_modt = vec![];
         let mut t_qlhat_inv_modql_divql_frac = vec![];
@@ -137,7 +156,19 @@ impl BfvParameters {
             t_bqlhat_inv_modql_divql_frac.push(bfractionals)
         });
 
-        todo!()
+        BfvParameters {
+            ciphertext_moduli,
+            ciphertext_moduli_sizes: ciphertext_moduli_sizes.to_vec(),
+            ciphertext_poly_contexts: poly_contexts,
+            plaintext_modulus,
+            ql_modt,
+            neg_t_inv_modql,
+            t_qlhat_inv_modql_divql_modt,
+            t_bqlhat_inv_modql_divql_modt,
+            t_qlhat_inv_modql_divql_frac,
+            t_bqlhat_inv_modql_divql_frac,
+            max_bit_size_by2: b,
+        }
     }
 }
 
