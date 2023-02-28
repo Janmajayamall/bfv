@@ -1,7 +1,7 @@
 use fhe_math::zq::Modulus;
 use itertools::{izip, Itertools};
 use nb_theory::generate_prime;
-use ndarray::MathCell;
+use ndarray::{Array2, MathCell};
 use num_bigint::BigUint;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::ToPrimitive;
@@ -21,8 +21,10 @@ mod poly;
 #[derive(PartialEq)]
 struct BfvParameters {
     ciphertext_moduli: Vec<u64>,
+    extension_moduli: Vec<u64>,
     ciphertext_moduli_sizes: Vec<usize>,
     pub ciphertext_poly_contexts: Vec<Arc<PolyContext>>,
+    pub extension_poly_contexts: Vec<Arc<PolyContext>>,
 
     pub plaintext_modulus: u64,
     pub plaintext_modulus_op: Modulus,
@@ -39,6 +41,16 @@ struct BfvParameters {
     pub t_qlhat_inv_modql_divql_frac: Vec<Vec<f64>>,
     pub t_bqlhat_inv_modql_divql_frac: Vec<Vec<f64>>,
     pub max_bit_size_by2: usize,
+
+    // Fast conversion P over Q
+    pub neg_pql_hat_inv_modql: Vec<Vec<u64>>,
+    pub ql_inv_modp: Vec<Array2<u64>>,
+
+    // Switch CRT basis Q to P //
+    pub ql_hat_modp: Vec<Array2<u64>>,
+    pub ql_hat_inv_modql: Vec<Vec<u64>>,
+    pub ql_inv: Vec<Vec<f64>>,
+    pub alphal_modp: Vec<Array2<u64>>,
 }
 
 impl BfvParameters {
@@ -80,7 +92,28 @@ impl BfvParameters {
                     }
                 } else {
                     // not enough primes
-                    assert!(false);
+                    panic!("Not enough primes!");
+                }
+            }
+        });
+
+        // generate extension modulus P
+        let mut extension_moduli = vec![];
+        ciphertext_moduli_sizes.iter().for_each(|size| {
+            let mut upper_bound = 1u64 << size;
+            loop {
+                if let Some(prime) =
+                    generate_prime(*size, 2 * polynomial_degree as u64, upper_bound)
+                {
+                    if !ciphertext_moduli.contains(&prime) && !extension_moduli.contains(&prime) {
+                        extension_moduli.push(prime);
+                        break;
+                    } else {
+                        upper_bound = prime;
+                    }
+                } else {
+                    // not enough primes
+                    panic!("Not enough primes!");
                 }
             }
         });
@@ -88,10 +121,16 @@ impl BfvParameters {
         // create contexts for all levels
         let moduli_count = ciphertext_moduli.len();
         let mut poly_contexts = vec![];
+        let mut extension_poly_contexts = vec![];
         for i in 0..moduli_count {
             let moduli_at_level = ciphertext_moduli[..moduli_count - i].to_vec();
+            let extension_moduli_at_level = extension_moduli[..moduli_count - i].to_vec();
             poly_contexts.push(Arc::new(PolyContext::new(
                 moduli_at_level.as_slice(),
+                polynomial_degree,
+            )));
+            extension_poly_contexts.push(Arc::new(PolyContext::new(
+                extension_moduli_at_level.as_slice(),
                 polynomial_degree,
             )));
         }
@@ -180,6 +219,111 @@ impl BfvParameters {
             t_bqlhat_inv_modql_divql_frac.push(bfractionals)
         });
 
+        // Fast Conv P Over Q //
+        let mut neg_pql_hat_inv_modql = vec![];
+        let mut ql_inv_modp = vec![];
+        izip!(poly_contexts.iter(), extension_poly_contexts.iter()).for_each(
+            |(q_context, p_context)| {
+                let q = q_context.modulus();
+                let q_dig = q_context.modulus_dig();
+                let p = p_context.modulus();
+
+                let mut neg_pq_hat_inv_modq = vec![];
+                let mut qi_inv_modp = vec![];
+
+                izip!(q_context.moduli.iter()).for_each(|qi| {
+                    let q_hat_inv_modqi = BigUint::from_bytes_le(
+                        &(&q_dig / qi)
+                            .mod_inverse(BigUintDig::from(*qi))
+                            .unwrap()
+                            .to_biguint()
+                            .unwrap()
+                            .to_bytes_le(),
+                    );
+                    neg_pq_hat_inv_modq.push(
+                        ((qi - ((&p * q_hat_inv_modqi) % qi)) % qi)
+                            .to_u64()
+                            .unwrap(),
+                    );
+
+                    p_context
+                        .moduli_ops
+                        .iter()
+                        .for_each(|pi| qi_inv_modp.push(pi.inv(*qi % pi.modulus()).unwrap()));
+                });
+
+                neg_pql_hat_inv_modql.push(neg_pq_hat_inv_modq);
+                ql_inv_modp.push(
+                    Array2::from_shape_vec(
+                        (q_context.moduli.len(), p_context.moduli.len()),
+                        qi_inv_modp,
+                    )
+                    .unwrap(),
+                );
+            },
+        );
+
+        // Switch CRT basis Q to P //
+        let mut ql_hat_modp = vec![];
+        let mut ql_hat_inv_modql = vec![];
+        let mut ql_inv = vec![];
+        let mut alphal_modp = vec![];
+        izip!(poly_contexts.iter(), extension_poly_contexts.iter()).for_each(
+            |(q_context, p_context)| {
+                let q = q_context.modulus();
+                let q_dig = q_context.modulus_dig();
+
+                let mut q_hat_inv_modq = vec![];
+                let mut q_inv = vec![];
+                q_context.moduli.iter().for_each(|qi| {
+                    let qihat_inv = BigUint::from_bytes_le(
+                        &(&q_dig / qi)
+                            .mod_inverse(BigUintDig::from(*qi))
+                            .unwrap()
+                            .to_biguint()
+                            .unwrap()
+                            .to_bytes_le(),
+                    )
+                    .to_u64()
+                    .unwrap();
+                    q_hat_inv_modq.push(qihat_inv);
+                    q_inv.push(1.0 / (*qi as f64));
+                });
+
+                let mut alpha_modp = vec![];
+                for i in 0..(q_context.moduli.len() + 1) {
+                    let u_q = &q * i;
+                    p_context.moduli.iter().for_each(|pi| {
+                        alpha_modp.push((&u_q % *pi).to_u64().unwrap());
+                    });
+                }
+
+                let mut q_hat_modp = vec![];
+                p_context.moduli.iter().for_each(|pi| {
+                    q_context.moduli.iter().for_each(|qi| {
+                        q_hat_modp.push(((&q / qi) % pi).to_u64().unwrap());
+                    })
+                });
+
+                ql_hat_modp.push(
+                    Array2::from_shape_vec(
+                        (p_context.moduli.len(), q_context.moduli.len()),
+                        q_hat_modp,
+                    )
+                    .unwrap(),
+                );
+                ql_hat_inv_modql.push(q_hat_inv_modq);
+                ql_inv.push(q_inv);
+                alphal_modp.push(
+                    Array2::from_shape_vec(
+                        (q_context.moduli.len() + 1, p_context.moduli.len()),
+                        alpha_modp,
+                    )
+                    .unwrap(),
+                )
+            },
+        );
+
         // To generate mapping for matrix representation index, we use: https://github.com/microsoft/SEAL/blob/82b07db635132e297282649e2ab5908999089ad2/native/src/seal/batchencoder.cpp
         let row = polynomial_degree >> 1;
         let m = polynomial_degree << 1;
@@ -199,8 +343,10 @@ impl BfvParameters {
 
         BfvParameters {
             ciphertext_moduli,
+            extension_moduli,
             ciphertext_moduli_sizes: ciphertext_moduli_sizes.to_vec(),
             ciphertext_poly_contexts: poly_contexts,
+            extension_poly_contexts,
             plaintext_modulus,
             plaintext_modulus_op: Modulus::new(plaintext_modulus).unwrap(),
             polynomial_degree,
@@ -210,6 +356,12 @@ impl BfvParameters {
             t_bqlhat_inv_modql_divql_modt,
             t_qlhat_inv_modql_divql_frac,
             t_bqlhat_inv_modql_divql_frac,
+            neg_pql_hat_inv_modql,
+            ql_inv_modp,
+            ql_hat_modp,
+            ql_hat_inv_modql,
+            ql_inv,
+            alphal_modp,
             max_bit_size_by2: b,
             matrix_reps_index_map,
         }

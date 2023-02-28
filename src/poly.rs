@@ -1,7 +1,7 @@
 use fhe_math::zq::{ntt::NttOperator, Modulus};
 use fhe_util::sample_vec_cbd;
 use itertools::{izip, DedupBy, Itertools};
-use ndarray::{Array2, Axis};
+use ndarray::{s, Array2, Axis};
 use num_bigint::{BigInt, BigUint};
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{identities::One, ToPrimitive, Zero};
@@ -26,7 +26,7 @@ pub enum Representation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PolyContext {
     pub moduli: Box<[u64]>,
-    moduli_ops: Box<[Modulus]>,
+    pub moduli_ops: Box<[Modulus]>,
     ntt_ops: Box<[NttOperator]>,
     q_hat: Box<[BigUint]>,
     q_hat_inv: Box<[BigUint]>,
@@ -139,6 +139,7 @@ impl Poly {
         variance: usize,
         rng: &mut R,
     ) -> Poly {
+        // TODO: replace this
         let v = sample_vec_cbd(poly_context.degree, variance, rng).unwrap();
         Poly::try_convert_from_i64(&v, poly_context, representation)
     }
@@ -222,6 +223,98 @@ impl Poly {
         });
 
         t_values
+    }
+
+    /// Given a polynomial in context with moduli Q returns a polynomial in context with moduli P by calculating [round(P/Q([poly]_Q))]_P
+    pub fn fast_conv_p_over_q(
+        &self,
+        p_context: &Arc<PolyContext>,
+        neg_pq_hat_inv_modq: &[u64],
+        q_inv_modp: &Array2<u64>,
+    ) -> Poly {
+        debug_assert!(self.representation == Representation::Coefficient);
+
+        let mut p = Poly::zero(p_context, &Representation::Coefficient);
+
+        // TODO: make parallel
+        izip!(
+            p.coefficients.axis_iter_mut(Axis(1)),
+            self.coefficients.axis_iter(Axis(1))
+        )
+        .for_each(|(mut p_rests, q_rests)| {
+            izip!(
+                q_rests.iter(),
+                q_inv_modp.outer_iter(),
+                neg_pq_hat_inv_modq.iter(),
+                self.context.moduli_ops.iter()
+            )
+            .for_each(|(xi, qi_inv_modp, neg_pqi_hat_inv, modqi)| {
+                let xi_v = modqi.mul(*xi, *neg_pqi_hat_inv);
+                izip!(
+                    p_rests.iter_mut(),
+                    qi_inv_modp.iter(),
+                    p_context.moduli_ops.iter()
+                )
+                .for_each(|(pxi, qi_inv, modpi)| {
+                    let tmp = modpi.mul(xi_v, *qi_inv);
+                    *pxi = modpi.add(*pxi, tmp);
+                })
+            });
+        });
+        p
+    }
+
+    pub fn switch_crt_basis(
+        &self,
+        p_context: &Arc<PolyContext>,
+        q_hat_modp: &Array2<u64>,
+        q_hat_inv_modq: &[u64],
+        q_inv_modq: &[f64],
+        alpha_modp: &Array2<u64>,
+    ) -> Poly {
+        dbg!(self.representation == Representation::Coefficient);
+
+        let mut p = Poly::zero(p_context, &Representation::Coefficient);
+        izip!(
+            p.coefficients.axis_iter_mut(Axis(1)),
+            self.coefficients.axis_iter(Axis(1))
+        )
+        .for_each(|(mut p_rests, q_rests)| {
+            let mut xi_q_hat_inv_modq = vec![];
+            let mut nu = 0.5f64;
+            izip!(
+                q_rests.iter(),
+                q_hat_inv_modq.iter(),
+                q_inv_modq.iter(),
+                self.context.moduli_ops.iter()
+            )
+            .for_each(|(xi, qi_hat_inv, q_inv, modq)| {
+                let tmp = modq.mul(*xi, *qi_hat_inv);
+                xi_q_hat_inv_modq.push(tmp);
+
+                nu += tmp as f64 * q_inv;
+            });
+
+            let alpha = alpha_modp.slice(s![nu as usize, ..]);
+
+            izip!(
+                p_rests.iter_mut(),
+                q_hat_modp.outer_iter(),
+                p_context.moduli_ops.iter(),
+                alpha.iter(),
+            )
+            .for_each(|(pxi, q_hat_modpi, modpi, alpha_modpi)| {
+                izip!(xi_q_hat_inv_modq.iter(), q_hat_modpi.iter()).for_each(
+                    |(xi_q_hat_inv, qi_hat)| {
+                        *pxi = modpi.add(*pxi, modpi.mul(*xi_q_hat_inv, *qi_hat));
+                    },
+                );
+
+                *pxi = modpi.sub(*pxi, *alpha_modpi);
+            });
+        });
+
+        p
     }
 }
 
@@ -384,6 +477,7 @@ impl From<&Poly> for Vec<BigUint> {
 
 //TODO: write tests for poly
 mod test {
+    use num_bigint::ToBigInt;
     use num_bigint_dig::UniformBigUint;
     use num_traits::Zero;
     use rand::{
@@ -447,5 +541,83 @@ mod test {
             Poly::try_convert_from_biguint(&values, &top_context, &Representation::Coefficient);
 
         assert_eq!(values, Vec::<BigUint>::from(&q_poly));
+    }
+
+    #[test]
+    pub fn test_fast_conv_p_over_q() {
+        let mut rng = thread_rng();
+        let bfv_params = BfvParameters::new(
+            &[
+                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
+                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
+            ],
+            1153,
+            8,
+        );
+
+        let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
+        let p_context = bfv_params.extension_poly_contexts[0].clone();
+        let mut q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
+        let p_poly = q_poly.fast_conv_p_over_q(
+            &p_context,
+            &bfv_params.neg_pql_hat_inv_modql[0],
+            &bfv_params.ql_inv_modp[0],
+        );
+
+        let q = q_context.modulus();
+        let p = p_context.modulus();
+        let p_expected: Vec<BigUint> = Vec::<BigUint>::from(&q_poly)
+            .iter()
+            .map(|xi| {
+                if xi >= &(&q >> 1usize) {
+                    if &q & BigUint::one() == BigUint::zero() {
+                        &p - &(((((&q - xi) * &p) + ((&q >> 1) - 1usize)) / &q) % &p)
+                    } else {
+                        &p - &(((((&q - xi) * &p) + (&q >> 1)) / &q) % &p)
+                    }
+                } else {
+                    (((xi * &p) + (&q >> 1)) / &q) % &p
+                }
+            })
+            .collect();
+
+        izip!(Vec::<BigUint>::from(&p_poly).iter(), p_expected.iter()).for_each(
+            |(res, expected)| {
+                let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
+                dbg!(diff.bits());
+            },
+        );
+    }
+
+    #[test]
+    pub fn test_switch_crt_basis() {
+        let mut rng = thread_rng();
+        let bfv_params = BfvParameters::new(&[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60], 1153, 8);
+
+        let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
+        let p_context = bfv_params.extension_poly_contexts[0].clone();
+        let mut q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
+        let p_poly = q_poly.switch_crt_basis(
+            &p_context,
+            &bfv_params.ql_hat_modp[0],
+            &bfv_params.ql_hat_inv_modql[0],
+            &bfv_params.ql_inv[0],
+            &bfv_params.alphal_modp[0],
+        );
+
+        let q = q_context.modulus();
+        let p = p_context.modulus();
+        let p_expected: Vec<BigUint> = Vec::<BigUint>::from(&q_poly)
+            .iter()
+            .map(|xi| {
+                if xi >= &(&q >> 1) {
+                    &p - ((&q - xi) % &p)
+                } else {
+                    xi % &p
+                }
+            })
+            .collect();
+
+        assert_eq!(p_expected, Vec::<BigUint>::from(&p_poly));
     }
 }
