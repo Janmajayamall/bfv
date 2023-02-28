@@ -25,6 +25,7 @@ struct BfvParameters {
     ciphertext_moduli_sizes: Vec<usize>,
     pub ciphertext_poly_contexts: Vec<Arc<PolyContext>>,
     pub extension_poly_contexts: Vec<Arc<PolyContext>>,
+    pub pq_poly_contexts: Vec<Arc<PolyContext>>,
 
     pub plaintext_modulus: u64,
     pub plaintext_modulus_op: Modulus,
@@ -42,9 +43,15 @@ struct BfvParameters {
     pub t_bqlhat_inv_modql_divql_frac: Vec<Vec<f64>>,
     pub max_bit_size_by2: usize,
 
+    // Fast expand CRT basis Q to P to PQ
     // Fast conversion P over Q
     pub neg_pql_hat_inv_modql: Vec<Vec<u64>>,
     pub ql_inv_modp: Vec<Array2<u64>>,
+    //  Switch CRT basis P to Q //
+    pub pl_hat_modq: Vec<Array2<u64>>,
+    pub pl_hat_inv_modpl: Vec<Vec<u64>>,
+    pub pl_inv: Vec<Vec<f64>>,
+    pub alphal_modq: Vec<Array2<u64>>,
 
     // Switch CRT basis Q to P //
     pub ql_hat_modp: Vec<Array2<u64>>,
@@ -122,6 +129,7 @@ impl BfvParameters {
         let moduli_count = ciphertext_moduli.len();
         let mut poly_contexts = vec![];
         let mut extension_poly_contexts = vec![];
+        let mut pq_poly_contexts = vec![];
         for i in 0..moduli_count {
             let moduli_at_level = ciphertext_moduli[..moduli_count - i].to_vec();
             let extension_moduli_at_level = extension_moduli[..moduli_count - i].to_vec();
@@ -131,6 +139,12 @@ impl BfvParameters {
             )));
             extension_poly_contexts.push(Arc::new(PolyContext::new(
                 extension_moduli_at_level.as_slice(),
+                polynomial_degree,
+            )));
+
+            let pq_at_level = [extension_moduli_at_level, moduli_at_level].concat();
+            pq_poly_contexts.push(Arc::new(PolyContext::new(
+                pq_at_level.as_slice(),
                 polynomial_degree,
             )));
         }
@@ -219,7 +233,8 @@ impl BfvParameters {
             t_bqlhat_inv_modql_divql_frac.push(bfractionals)
         });
 
-        // Fast Conv P Over Q //
+        // Fast expand CRT basis Q to P to PQ
+        // 1. Fast Conv P Over Q //
         let mut neg_pql_hat_inv_modql = vec![];
         let mut ql_inv_modp = vec![];
         izip!(poly_contexts.iter(), extension_poly_contexts.iter()).for_each(
@@ -260,6 +275,66 @@ impl BfvParameters {
                     )
                     .unwrap(),
                 );
+            },
+        );
+        // 2. Switch CRT basis P to Q //
+        let mut pl_hat_modq = vec![];
+        let mut pl_hat_inv_modpl = vec![];
+        let mut pl_inv = vec![];
+        let mut alphal_modq = vec![];
+        izip!(poly_contexts.iter(), extension_poly_contexts.iter()).for_each(
+            |(q_context, p_context)| {
+                let p = p_context.modulus();
+                let p_dig = p_context.modulus_dig();
+
+                let mut p_hat_inv_modp = vec![];
+                let mut p_inv = vec![];
+                p_context.moduli.iter().for_each(|pi| {
+                    let pihat_inv = BigUint::from_bytes_le(
+                        &(&p_dig / pi)
+                            .mod_inverse(BigUintDig::from(*pi))
+                            .unwrap()
+                            .to_biguint()
+                            .unwrap()
+                            .to_bytes_le(),
+                    )
+                    .to_u64()
+                    .unwrap();
+                    p_hat_inv_modp.push(pihat_inv);
+                    p_inv.push(1.0 / (*pi as f64));
+                });
+
+                let mut alpha_modp = vec![];
+                for i in 0..(p_context.moduli.len() + 1) {
+                    let u_p = &p * i;
+                    q_context.moduli.iter().for_each(|qi| {
+                        alpha_modp.push((&u_p % *qi).to_u64().unwrap());
+                    });
+                }
+
+                let mut p_hat_modq = vec![];
+                q_context.moduli.iter().for_each(|qi| {
+                    p_context.moduli.iter().for_each(|pi| {
+                        p_hat_modq.push(((&p / pi) % qi).to_u64().unwrap());
+                    })
+                });
+
+                pl_hat_modq.push(
+                    Array2::from_shape_vec(
+                        (q_context.moduli.len(), p_context.moduli.len()),
+                        p_hat_modq,
+                    )
+                    .unwrap(),
+                );
+                pl_hat_inv_modpl.push(p_hat_inv_modp);
+                pl_inv.push(p_inv);
+                alphal_modq.push(
+                    Array2::from_shape_vec(
+                        (p_context.moduli.len() + 1, q_context.moduli.len()),
+                        alpha_modp,
+                    )
+                    .unwrap(),
+                )
             },
         );
 
@@ -347,6 +422,7 @@ impl BfvParameters {
             ciphertext_moduli_sizes: ciphertext_moduli_sizes.to_vec(),
             ciphertext_poly_contexts: poly_contexts,
             extension_poly_contexts,
+            pq_poly_contexts,
             plaintext_modulus,
             plaintext_modulus_op: Modulus::new(plaintext_modulus).unwrap(),
             polynomial_degree,
@@ -358,6 +434,10 @@ impl BfvParameters {
             t_bqlhat_inv_modql_divql_frac,
             neg_pql_hat_inv_modql,
             ql_inv_modp,
+            pl_hat_modq,
+            pl_hat_inv_modpl,
+            pl_inv,
+            alphal_modq,
             ql_hat_modp,
             ql_hat_inv_modql,
             ql_inv,

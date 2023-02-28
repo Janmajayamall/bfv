@@ -269,7 +269,7 @@ impl Poly {
         p_context: &Arc<PolyContext>,
         q_hat_modp: &Array2<u64>,
         q_hat_inv_modq: &[u64],
-        q_inv_modq: &[f64],
+        q_inv: &[f64],
         alpha_modp: &Array2<u64>,
     ) -> Poly {
         dbg!(self.representation == Representation::Coefficient);
@@ -285,7 +285,7 @@ impl Poly {
             izip!(
                 q_rests.iter(),
                 q_hat_inv_modq.iter(),
-                q_inv_modq.iter(),
+                q_inv.iter(),
                 self.context.moduli_ops.iter()
             )
             .for_each(|(xi, qi_hat_inv, q_inv, modq)| {
@@ -315,6 +315,49 @@ impl Poly {
         });
 
         p
+    }
+
+    pub fn fast_expand_crt_basis_p_over_q(
+        &self,
+        p_context: &Arc<PolyContext>,
+        pq_context: &Arc<PolyContext>,
+        neg_pq_hat_inv_modq: &[u64],
+        q_inv_modp: &Array2<u64>,
+        p_hat_modq: &Array2<u64>,
+        p_hat_inv_modp: &[u64],
+        p_inv: &[f64],
+        alpha_modq: &Array2<u64>,
+    ) -> Poly {
+        let p = self.fast_conv_p_over_q(p_context, neg_pq_hat_inv_modq, q_inv_modp);
+
+        // switch p to q
+        let q = p.switch_crt_basis(&self.context, p_hat_modq, p_hat_inv_modp, p_inv, alpha_modq);
+
+        let mut pq = Poly::zero(pq_context, &Representation::Coefficient);
+        izip!(
+            pq.coefficients.outer_iter_mut(),
+            p.coefficients.outer_iter()
+        )
+        .for_each(|(mut pq_row, p_row)| {
+            pq_row
+                .as_slice_mut()
+                .unwrap()
+                .copy_from_slice(p_row.as_slice().unwrap());
+        });
+        izip!(
+            pq.coefficients
+                .outer_iter_mut()
+                .skip(p_context.moduli.len()),
+            q.coefficients.outer_iter()
+        )
+        .for_each(|(mut pq_row, q_row)| {
+            pq_row
+                .as_slice_mut()
+                .unwrap()
+                .copy_from_slice(q_row.as_slice().unwrap());
+        });
+
+        pq
     }
 }
 
@@ -619,5 +662,59 @@ mod test {
             .collect();
 
         assert_eq!(p_expected, Vec::<BigUint>::from(&p_poly));
+    }
+
+    #[test]
+    pub fn test_fast_expand_crt_basis_p_over_q() {
+        let mut rng = thread_rng();
+        let bfv_params = BfvParameters::new(
+            &[
+                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
+                60, 60,
+            ],
+            1153,
+            8,
+        );
+
+        let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
+        let p_context = bfv_params.extension_poly_contexts[0].clone();
+        let pq_context = bfv_params.pq_poly_contexts[0].clone();
+        let mut q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
+
+        let pq_poly = q_poly.fast_expand_crt_basis_p_over_q(
+            &p_context,
+            &pq_context,
+            &bfv_params.neg_pql_hat_inv_modql[0],
+            &bfv_params.ql_inv_modp[0],
+            &bfv_params.pl_hat_modq[0],
+            &bfv_params.pl_hat_inv_modpl[0],
+            &bfv_params.pl_inv[0],
+            &bfv_params.alphal_modq[0],
+        );
+
+        let q = q_context.modulus();
+        let p = p_context.modulus();
+        let pq = pq_context.modulus();
+        let p_expected: Vec<BigUint> = Vec::<BigUint>::from(&q_poly)
+            .iter()
+            .map(|xi| {
+                if xi >= &(&q >> 1usize) {
+                    if &q & BigUint::one() == BigUint::zero() {
+                        &pq - &(((((&q - xi) * &p) + ((&q >> 1) - 1usize)) / &q) % &pq)
+                    } else {
+                        &pq - &(((((&q - xi) * &p) + (&q >> 1)) / &q) % &pq)
+                    }
+                } else {
+                    (((xi * &p) + (&q >> 1)) / &q) % &pq
+                }
+            })
+            .collect();
+
+        izip!(Vec::<BigUint>::from(&pq_poly).iter(), p_expected.iter()).for_each(
+            |(res, expected)| {
+                let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
+                dbg!(diff.bits());
+            },
+        );
     }
 }
