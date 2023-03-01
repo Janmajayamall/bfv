@@ -246,7 +246,6 @@ impl Poly {
         let mut input_offset = 0;
         let mut output_offset = 0;
         let mut input_size = 0;
-        let mut output_size = 0;
         if out_context == p_context {
             input_offset = p_context.moduli.len();
             input_size = q_context.moduli.len();
@@ -254,7 +253,6 @@ impl Poly {
             output_offset = p_context.moduli.len();
             input_size = p_context.moduli.len();
         }
-        output_size = self.context.moduli.len() - input_size;
 
         izip!(
             self.coefficients.axis_iter(Axis(1)),
@@ -275,27 +273,66 @@ impl Poly {
                 frac =
                     frac.wrapping_add(&U192::from_words([lo as u64, hi as u64, (hi >> 64) as u64]));
             });
-            let frac = frac.shr_vartime(127).as_words()[0];
+            let frac = frac.shr_vartime(127).as_words()[0] as u128;
 
-            izip!(
-                o_rests.iter_mut(),
-                out_context.moduli_ops.iter(),
-                to_s_hat_inv_mods_divs_modo.outer_iter()
-            )
-            .enumerate()
-            .for_each(|(index, (oxi, modo, rationals_oi))| {
-                izip!(
-                    pq_rests
-                        .slice(s![input_offset..input_offset + input_size])
-                        .iter(),
-                    rationals_oi.iter()
-                )
-                .for_each(|(ixi, rational)| *oxi = modo.add(*oxi, modo.mul(*ixi, *rational)));
+            // let now = std::time::Instant::now();
 
-                let ixi = pq_rests[output_offset + index];
-                *oxi = modo.add(*oxi, modo.mul(ixi, rationals_oi[input_size]));
-                *oxi = modo.add(*oxi, frac);
-            });
+            // dbg!(
+            //     pq_rests
+            //         .slice(s![input_offset..input_offset + input_size])
+            //         .len(),
+            //     o_rests.len()
+            // );
+
+            unsafe {
+                let input = pq_rests.slice(s![input_offset..input_offset + input_size]);
+                for i in 0..o_rests.len() {
+                    let modo = out_context.moduli_ops.get_unchecked(i);
+
+                    let mut s = frac;
+                    for j in 0..input.len() {
+                        s += modo.mul(
+                            *input.get(j).unwrap(),
+                            *to_s_hat_inv_mods_divs_modo.get((i, j)).unwrap(),
+                        ) as u128;
+                    }
+
+                    s += modo.mul(
+                        *pq_rests.get(output_offset + i).unwrap(),
+                        *to_s_hat_inv_mods_divs_modo.get((i, input_size)).unwrap(),
+                    ) as u128;
+
+                    let oxi = o_rests.get_mut(i).unwrap();
+                    *oxi = modo.reduce_u128(s);
+                }
+            }
+            // println!("inner time: {:?}", now.elapsed());
+
+            // izip!(
+            //     o_rests.iter_mut(),
+            //     out_context.moduli_ops.iter(),
+            //     to_s_hat_inv_mods_divs_modo.outer_iter()
+            // )
+            // .enumerate()
+            // .for_each(|(index, (oxi, modo, rationals_oi))| {
+            //     let mut s = *oxi as u128;
+            //     izip!(
+            //         pq_rests
+            //             .slice(s![input_offset..input_offset + input_size])
+            //             .iter(),
+            //         rationals_oi.iter()
+            //     )
+            //     .for_each(|(ixi, rational)| {
+            //         s += modo.mul(*ixi, *rational) as u128;
+            //     });
+
+            //     let ixi = pq_rests.get(output_offset + index).unwrap();
+            //     s += modo.mul(*ixi, *rationals_oi.get(input_size).unwrap()) as u128;
+            //     s += frac;
+
+            //     *oxi = modo.reduce_u128(s);
+            // });
+            // println!("inner time: {:?}", now.elapsed());
         });
 
         o
@@ -348,7 +385,7 @@ impl Poly {
         q_inv: &[f64],
         alpha_modp: &Array2<u64>,
     ) -> Poly {
-        dbg!(self.representation == Representation::Coefficient);
+        debug_assert!(self.representation == Representation::Coefficient);
 
         let mut p = Poly::zero(p_context, &Representation::Coefficient);
         izip!(
@@ -432,6 +469,71 @@ impl Poly {
                 .unwrap()
                 .copy_from_slice(q_row.as_slice().unwrap());
         });
+
+        pq
+    }
+
+    pub fn expand_crt_basis(
+        &mut self,
+        pq_context: &Arc<PolyContext>,
+        p_context: &Arc<PolyContext>,
+        q_hat_modp: &Array2<u64>,
+        q_hat_inv_modq: &[u64],
+        q_inv: &[f64],
+        alpha_modp: &Array2<u64>,
+    ) -> Poly {
+        let representation_cache = self.representation.clone();
+        let mut ntt_cache: Option<Array2<u64>> = None;
+
+        if self.representation == Representation::Evaluation {
+            // Save coefficients to avoid ntt operations later
+            ntt_cache = Some(self.coefficients.clone());
+            self.change_representation(Representation::Coefficient);
+        }
+
+        let mut p = self.switch_crt_basis(p_context, q_hat_modp, q_hat_inv_modq, q_inv, alpha_modp);
+        p.change_representation(representation_cache.clone());
+
+        let mut pq = Poly::zero(pq_context, &representation_cache);
+        izip!(
+            pq.coefficients.outer_iter_mut(),
+            p.coefficients.outer_iter()
+        )
+        .for_each(|(mut pq_row, p_row)| {
+            pq_row
+                .as_slice_mut()
+                .unwrap()
+                .copy_from_slice(p_row.as_slice().unwrap());
+        });
+
+        if let Some(ntt_cache) = ntt_cache {
+            izip!(
+                pq.coefficients
+                    .outer_iter_mut()
+                    .skip(p_context.moduli.len()),
+                ntt_cache.outer_iter()
+            )
+            .for_each(|(mut pq_row, q_row)| {
+                pq_row
+                    .as_slice_mut()
+                    .unwrap()
+                    .copy_from_slice(q_row.as_slice().unwrap());
+            });
+        } else {
+            self.change_representation(representation_cache);
+            izip!(
+                pq.coefficients
+                    .outer_iter_mut()
+                    .skip(p_context.moduli.len()),
+                self.coefficients.outer_iter()
+            )
+            .for_each(|(mut pq_row, q_row)| {
+                pq_row
+                    .as_slice_mut()
+                    .unwrap()
+                    .copy_from_slice(q_row.as_slice().unwrap());
+            });
+        }
 
         pq
     }
@@ -595,7 +697,7 @@ impl From<&Poly> for Vec<BigUint> {
 }
 
 //TODO: write tests for poly
-mod test {
+mod tests {
     use num_bigint::ToBigInt;
     use num_bigint_dig::UniformBigUint;
     use num_traits::Zero;
@@ -608,7 +710,7 @@ mod test {
     use crate::{nb_theory::generate_prime, BfvParameters};
 
     #[test]
-    fn test_scale_and_round_decryption() {
+    fn test_scale_and_roun1d_decryption() {
         let mut rng = thread_rng();
         let bfv_params = BfvParameters::new(&[60, 60, 60, 60], 65537, 8);
 
@@ -797,7 +899,13 @@ mod test {
     #[test]
     pub fn test_scale_and_round() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::new(&[50, 50, 50, 50, 50, 50], 1153, 8);
+        let bfv_params = BfvParameters::new(
+            &[
+                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
+            ],
+            65537,
+            1 << 15,
+        );
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -805,6 +913,7 @@ mod test {
 
         let pq_poly = Poly::random(&pq_context, &Representation::Coefficient, &mut rng);
 
+        let now = std::time::Instant::now();
         let q_poly = pq_poly.scale_and_round(
             &q_context,
             &p_context,
@@ -813,6 +922,7 @@ mod test {
             &bfv_params.tql_p_hat_inv_modp_divp_frac_hi[0],
             &bfv_params.tql_p_hat_inv_modp_divp_frac_lo[0],
         );
+        println!("time: {:?}", now.elapsed());
 
         let t = bfv_params.plaintext_modulus;
         let p = p_context.modulus();
