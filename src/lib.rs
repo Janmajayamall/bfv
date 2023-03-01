@@ -53,6 +53,11 @@ struct BfvParameters {
     pub pl_inv: Vec<Vec<f64>>,
     pub alphal_modq: Vec<Array2<u64>>,
 
+    // Scale and Round //
+    pub tql_p_hat_inv_modp_divp_modql: Vec<Array2<u64>>,
+    pub tql_p_hat_inv_modp_divp_frac_hi: Vec<Vec<u64>>,
+    pub tql_p_hat_inv_modp_divp_frac_lo: Vec<Vec<u64>>,
+
     // Switch CRT basis Q to P //
     pub ql_hat_modp: Vec<Array2<u64>>,
     pub ql_hat_inv_modql: Vec<Vec<u64>>,
@@ -338,6 +343,95 @@ impl BfvParameters {
             },
         );
 
+        // Scale and Round //
+        let mut tql_p_hat_inv_modp_divp_modql = vec![];
+        let mut tql_p_hat_inv_modp_divp_frac_hi = vec![];
+        let mut tql_p_hat_inv_modp_divp_frac_lo = vec![];
+        izip!(
+            poly_contexts.iter(),
+            extension_poly_contexts.iter(),
+            pq_poly_contexts.iter()
+        )
+        .for_each(|(q_context, p_context, pq_context)| {
+            let pq = pq_context.modulus();
+            let pq_dig = pq_context.modulus_dig();
+            let q = q_context.modulus();
+            let t = plaintext_modulus;
+
+            let mut tq_p_hat_inv_modp_divp_modq = vec![];
+            let mut tq_p_hat_inv_modp_divp_frac_hi = vec![];
+            let mut tq_p_hat_inv_modp_divp_frac_lo = vec![];
+            q_context.moduli.iter().for_each(|qi| {
+                p_context.moduli.iter().for_each(|pi| {
+                    let mut tq_p_hat_inv_modp = (BigUint::from_bytes_le(
+                        &(&pq_dig / pi)
+                            .mod_inverse(BigUintDig::from(*pi))
+                            .unwrap()
+                            .to_biguint()
+                            .unwrap()
+                            .to_bytes_le(),
+                    ) * t
+                        * &q);
+                    let rational = ((&tq_p_hat_inv_modp / *pi) % *qi).to_u64().unwrap();
+
+                    // let mut frac = tq_p_hat_inv_modp % pi;
+                    // frac <<= 127;
+                    // frac /= *pi;
+                    // let frac = frac.to_u128().unwrap();
+                    // let frac_hi = (frac >> 64) as u64;
+                    // let frac_lo = (frac - ((frac_hi as u128) << 64)) as u64;
+
+                    tq_p_hat_inv_modp_divp_modq.push(rational);
+                    // tq_p_hat_inv_modp_divp_frac_hi.push(frac_hi);
+                    // tq_p_hat_inv_modp_divp_frac_lo.push(frac_lo);
+                });
+
+                let tq_qi_hat_inv_modqi = (BigUint::from_bytes_le(
+                    &(&pq_dig / qi)
+                        .mod_inverse(BigUintDig::from(*qi))
+                        .unwrap()
+                        .to_biguint()
+                        .unwrap()
+                        .to_bytes_le(),
+                ) * t
+                    * &q);
+                tq_p_hat_inv_modp_divp_modq
+                    .push(((tq_qi_hat_inv_modqi / *qi) % *qi).to_u64().unwrap());
+            });
+
+            p_context.moduli.iter().for_each(|pi| {
+                let mut tq_p_hat_inv_modp = (BigUint::from_bytes_le(
+                    &(&pq_dig / pi)
+                        .mod_inverse(BigUintDig::from(*pi))
+                        .unwrap()
+                        .to_biguint()
+                        .unwrap()
+                        .to_bytes_le(),
+                ) * t
+                    * &q);
+
+                let mut frac = tq_p_hat_inv_modp % pi;
+                frac <<= 127;
+                frac /= *pi;
+                let frac = frac.to_u128().unwrap();
+                let frac_hi = (frac >> 64) as u64;
+                let frac_lo = (frac - ((frac_hi as u128) << 64)) as u64;
+
+                tq_p_hat_inv_modp_divp_frac_hi.push(frac_hi);
+                tq_p_hat_inv_modp_divp_frac_lo.push(frac_lo);
+            });
+
+            tql_p_hat_inv_modp_divp_modql.push(
+                Array2::from_shape_vec(
+                    (q_context.moduli.len(), p_context.moduli.len() + 1),
+                    tq_p_hat_inv_modp_divp_modq,
+                )
+                .unwrap(),
+            );
+            tql_p_hat_inv_modp_divp_frac_hi.push(tq_p_hat_inv_modp_divp_frac_hi);
+            tql_p_hat_inv_modp_divp_frac_lo.push(tq_p_hat_inv_modp_divp_frac_lo);
+        });
+
         // Switch CRT basis Q to P //
         let mut ql_hat_modp = vec![];
         let mut ql_hat_inv_modql = vec![];
@@ -426,18 +520,31 @@ impl BfvParameters {
             plaintext_modulus,
             plaintext_modulus_op: Modulus::new(plaintext_modulus).unwrap(),
             polynomial_degree,
+
+            // ENCRYPTION //
             ql_modt,
             neg_t_inv_modql,
+
+            // DECRYPTION //
             t_qlhat_inv_modql_divql_modt,
             t_bqlhat_inv_modql_divql_modt,
             t_qlhat_inv_modql_divql_frac,
             t_bqlhat_inv_modql_divql_frac,
+
+            // Fast expand CRT basis Q to P to PQ
             neg_pql_hat_inv_modql,
             ql_inv_modp,
             pl_hat_modq,
             pl_hat_inv_modpl,
             pl_inv,
             alphal_modq,
+
+            // Scale and Round //
+            tql_p_hat_inv_modp_divp_modql,
+            tql_p_hat_inv_modp_divp_frac_hi,
+            tql_p_hat_inv_modp_divp_frac_lo,
+
+            // Switch CRT basis Q to P //
             ql_hat_modp,
             ql_hat_inv_modql,
             ql_inv,

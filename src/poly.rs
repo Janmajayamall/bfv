@@ -1,4 +1,8 @@
-use fhe_math::zq::{ntt::NttOperator, Modulus};
+use crypto_bigint::U192;
+use fhe_math::{
+    rq::Context,
+    zq::{ntt::NttOperator, Modulus},
+};
 use fhe_util::sample_vec_cbd;
 use itertools::{izip, DedupBy, Itertools};
 use ndarray::{s, Array2, Axis};
@@ -223,6 +227,78 @@ impl Poly {
         });
 
         t_values
+    }
+
+    /// Assumes the polynomial is in context with modulus PQ, and the out_context is either P or Q
+    ///
+    /// If out_context is P, scales the polynomial by t/Q otherwise scales the polynomial by t/P
+    pub fn scale_and_round(
+        &self,
+        out_context: &Arc<PolyContext>,
+        p_context: &Arc<PolyContext>,
+        q_context: &Arc<PolyContext>,
+        to_s_hat_inv_mods_divs_modo: &Array2<u64>,
+        to_s_hat_inv_mods_divs_frachi: &[u64],
+        to_s_hat_inv_mods_divs_fraclo: &[u64],
+    ) -> Poly {
+        let mut o = Poly::zero(out_context, &Representation::Coefficient);
+
+        let mut input_offset = 0;
+        let mut output_offset = 0;
+        let mut input_size = 0;
+        let mut output_size = 0;
+        if out_context == p_context {
+            input_offset = p_context.moduli.len();
+            input_size = q_context.moduli.len();
+        } else {
+            output_offset = p_context.moduli.len();
+            input_size = p_context.moduli.len();
+        }
+        output_size = self.context.moduli.len() - input_size;
+
+        izip!(
+            self.coefficients.axis_iter(Axis(1)),
+            o.coefficients.axis_iter_mut(Axis(1))
+        )
+        .for_each(|(pq_rests, mut o_rests)| {
+            let mut frac = U192::ZERO;
+            izip!(
+                pq_rests
+                    .slice(s![input_offset..input_offset + input_size])
+                    .iter(),
+                to_s_hat_inv_mods_divs_frachi.iter(),
+                to_s_hat_inv_mods_divs_fraclo.iter()
+            )
+            .for_each(|(xi, frac_hi, frac_lo)| {
+                let lo = *xi as u128 * *frac_lo as u128;
+                let hi = (*xi as u128 * *frac_hi as u128) + (lo >> 64);
+                frac =
+                    frac.wrapping_add(&U192::from_words([lo as u64, hi as u64, (hi >> 64) as u64]));
+            });
+            let frac = frac.shr_vartime(127).as_words()[0];
+
+            izip!(
+                o_rests.iter_mut(),
+                out_context.moduli_ops.iter(),
+                to_s_hat_inv_mods_divs_modo.outer_iter()
+            )
+            .enumerate()
+            .for_each(|(index, (oxi, modo, rationals_oi))| {
+                izip!(
+                    pq_rests
+                        .slice(s![input_offset..input_offset + input_size])
+                        .iter(),
+                    rationals_oi.iter()
+                )
+                .for_each(|(ixi, rational)| *oxi = modo.add(*oxi, modo.mul(*ixi, *rational)));
+
+                let ixi = pq_rests[output_offset + index];
+                *oxi = modo.add(*oxi, modo.mul(ixi, rationals_oi[input_size]));
+                *oxi = modo.add(*oxi, frac);
+            });
+        });
+
+        o
     }
 
     /// Given a polynomial in context with moduli Q returns a polynomial in context with moduli P by calculating [round(P/Q([poly]_Q))]_P
@@ -711,6 +787,53 @@ mod test {
             .collect();
 
         izip!(Vec::<BigUint>::from(&pq_poly).iter(), p_expected.iter()).for_each(
+            |(res, expected)| {
+                let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
+                dbg!(diff.bits());
+            },
+        );
+    }
+
+    #[test]
+    pub fn test_scale_and_round() {
+        let mut rng = thread_rng();
+        let bfv_params = BfvParameters::new(&[50, 50, 50, 50, 50, 50], 1153, 8);
+
+        let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
+        let p_context = bfv_params.extension_poly_contexts[0].clone();
+        let pq_context = bfv_params.pq_poly_contexts[0].clone();
+
+        let pq_poly = Poly::random(&pq_context, &Representation::Coefficient, &mut rng);
+
+        let q_poly = pq_poly.scale_and_round(
+            &q_context,
+            &p_context,
+            &q_context,
+            &bfv_params.tql_p_hat_inv_modp_divp_modql[0],
+            &bfv_params.tql_p_hat_inv_modp_divp_frac_hi[0],
+            &bfv_params.tql_p_hat_inv_modp_divp_frac_lo[0],
+        );
+
+        let t = bfv_params.plaintext_modulus;
+        let p = p_context.modulus();
+        let q = q_context.modulus();
+        let pq = pq_context.modulus();
+        let q_expected: Vec<BigUint> = Vec::<BigUint>::from(&pq_poly)
+            .iter()
+            .map(|xi| {
+                if xi >= &(&pq >> 1usize) {
+                    if &pq & BigUint::one() == BigUint::zero() {
+                        &q - &(((((&pq - xi) * &t) + ((&p >> 1) - 1usize)) / &p) % &q)
+                    } else {
+                        &q - &(((((&pq - xi) * &t) + (&p >> 1)) / &p) % &q)
+                    }
+                } else {
+                    (((xi * &t) + (&p >> 1)) / &p) % &q
+                }
+            })
+            .collect();
+
+        izip!(Vec::<BigUint>::from(&q_poly).iter(), q_expected.iter()).for_each(
             |(res, expected)| {
                 let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
                 dbg!(diff.bits());
