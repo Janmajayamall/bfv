@@ -259,8 +259,6 @@ impl Poly {
             o.coefficients.axis_iter_mut(Axis(1))
         )
         .for_each(|(pq_rests, mut o_rests)| {
-            // let mut now = std::time::Instant::now();
-
             let mut frac = U192::ZERO;
             izip!(
                 pq_rests
@@ -276,10 +274,9 @@ impl Poly {
                     frac.wrapping_add(&U192::from_words([lo as u64, hi as u64, (hi >> 64) as u64]));
             });
 
-            // println!("time 1: {:?}", now.elapsed());
-
             let frac = frac.shr_vartime(127).as_words()[0] as u128;
 
+            // let mut now = std::time::Instant::now();
             unsafe {
                 let input = pq_rests.slice(s![input_offset..input_offset + input_size]);
                 for i in 0..o_rests.len() {
@@ -302,74 +299,8 @@ impl Poly {
                     *oxi = modo.reduce_u128(s);
                 }
             }
+            // println!("inner time1: {:?}", now.elapsed());
         });
-
-        o
-    }
-
-    pub fn scale_rand_ff(
-        &self,
-        out_context: &Arc<PolyContext>,
-        p_context: &Arc<PolyContext>,
-        q_context: &Arc<PolyContext>,
-        to_s_hat_inv_mods_divs_modo: &Array2<u64>,
-        to_s_hat_inv_mods_divs_frachi: &[u64],
-        to_s_hat_inv_mods_divs_fraclo: &[u64],
-    ) -> Poly {
-        let mut o = Poly::zero(out_context, &Representation::Coefficient);
-
-        let mut input_offset = 0;
-        let mut output_offset = 0;
-        let mut input_size = 0;
-        if out_context == p_context {
-            input_offset = p_context.moduli.len();
-            input_size = q_context.moduli.len();
-        } else {
-            output_offset = p_context.moduli.len();
-            input_size = p_context.moduli.len();
-        }
-        let output_size = self.context.moduli.len() - input_size;
-
-        for ri in 0..self.context.degree {
-            let mut frac = U192::ZERO;
-            unsafe {
-                for i in 0..input_size {
-                    let xi = self.coefficients.get((i + input_offset, ri)).unwrap();
-                    let lo = *xi as u128 * *to_s_hat_inv_mods_divs_fraclo.get_unchecked(i) as u128;
-                    let hi = (*xi as u128
-                        * *to_s_hat_inv_mods_divs_frachi.get_unchecked(i) as u128)
-                        + (lo >> 64);
-                    frac = frac.wrapping_add(&U192::from_words([
-                        lo as u64,
-                        hi as u64,
-                        (hi >> 64) as u64,
-                    ]));
-                }
-            }
-            let frac = frac.shr_vartime(127).as_words()[0] as u128;
-
-            unsafe {
-                for i in 0..output_size {
-                    let modo = out_context.moduli_ops.get_unchecked(i);
-
-                    let mut s = frac;
-                    for j in 0..input_size {
-                        s += modo.mul(
-                            *self.coefficients.get((i + input_offset, ri)).unwrap(),
-                            *to_s_hat_inv_mods_divs_modo.get((i, j)).unwrap(),
-                        ) as u128;
-                    }
-
-                    s += modo.mul(
-                        *self.coefficients.get((output_offset + i, ri)).unwrap(),
-                        *to_s_hat_inv_mods_divs_modo.get((i, input_size)).unwrap(),
-                    ) as u128;
-
-                    let oxi = o.coefficients.get_mut((i, ri)).unwrap();
-                    *oxi = modo.reduce_u128(s);
-                }
-            }
-        }
 
         o
     }
@@ -959,17 +890,6 @@ mod tests {
             &bfv_params.tql_p_hat_inv_modp_divp_frac_lo[0],
         );
         println!("time1: {:?}", now.elapsed());
-
-        let now = std::time::Instant::now();
-        let q_poly = pq_poly.scale_rand_ff(
-            &q_context,
-            &p_context,
-            &q_context,
-            &bfv_params.tql_p_hat_inv_modp_divp_modql[0],
-            &bfv_params.tql_p_hat_inv_modp_divp_frac_hi[0],
-            &bfv_params.tql_p_hat_inv_modp_divp_frac_lo[0],
-        );
-        println!("time2: {:?}", now.elapsed());
 
         let t = bfv_params.plaintext_modulus;
         let p = p_context.modulus();
