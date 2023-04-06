@@ -1,4 +1,4 @@
-use fhe_math::zq::Modulus;
+use fhe_math::zq::{ntt::NttOperator, Modulus};
 use itertools::{izip, Itertools};
 use nb_theory::generate_prime;
 use ndarray::{Array2, MathCell};
@@ -29,6 +29,7 @@ struct BfvParameters {
 
     pub plaintext_modulus: u64,
     pub plaintext_modulus_op: Modulus,
+    pub plaintext_ntt_op: NttOperator,
     pub polynomial_degree: usize,
 
     // Encryption
@@ -161,7 +162,7 @@ impl BfvParameters {
             let q = poly_context.modulus();
             let q_dig = poly_context.modulus_dig();
 
-            // [Q * t]_t
+            // [Q]_t
             ql_modt.push((q % plaintext_modulus).to_u64().unwrap());
 
             // [(-t)^-1]_Q
@@ -510,6 +511,10 @@ impl BfvParameters {
             pos &= m - 1;
         }
 
+        let plaintext_modulus_op = Modulus::new(plaintext_modulus).unwrap();
+        // FIXME: throw error instead
+        let plaintext_ntt_op = NttOperator::new(&plaintext_modulus_op, polynomial_degree).unwrap();
+
         BfvParameters {
             ciphertext_moduli,
             extension_moduli,
@@ -518,7 +523,8 @@ impl BfvParameters {
             extension_poly_contexts,
             pq_poly_contexts,
             plaintext_modulus,
-            plaintext_modulus_op: Modulus::new(plaintext_modulus).unwrap(),
+            plaintext_modulus_op,
+            plaintext_ntt_op,
             polynomial_degree,
 
             // ENCRYPTION //
@@ -841,6 +847,10 @@ impl Plaintext {
             }
         });
 
+        if encoding.encoding_type == EncodingType::Simd {
+            params.plaintext_ntt_op.backward(&mut m1);
+        }
+
         Plaintext {
             m: m1,
             params: params.clone(),
@@ -851,12 +861,17 @@ impl Plaintext {
     pub fn decode(&self, encoding: Encoding) -> Vec<u64> {
         assert!(self.encoding.is_none());
 
+        let mut m1 = self.m.clone();
+        if encoding.encoding_type == EncodingType::Simd {
+            self.params.plaintext_ntt_op.forward(&mut m1);
+        }
+
         let mut m = vec![0u64; self.params.polynomial_degree];
         for i in (0..self.params.polynomial_degree) {
             if encoding.encoding_type == EncodingType::Simd {
-                m[i] = self.m[self.params.matrix_reps_index_map[i]];
+                m[i] = m1[self.params.matrix_reps_index_map[i]];
             } else {
-                m[i] = self.m[i];
+                m[i] = m1[i];
             }
         }
 
@@ -922,15 +937,13 @@ mod tests {
     fn test_ciphertext_multiplication1() {
         let mut rng = thread_rng();
         let params = Arc::new(BfvParameters::new(
-            &[
-                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
-            ],
+            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
             65537,
-            1 << 15,
+            8,
         ));
         let sk = SecretKey::random(&params, &mut rng);
 
-        let m1 = rng
+        let mut m1 = rng
             .clone()
             .sample_iter(Uniform::new(0, params.plaintext_modulus))
             .take(params.polynomial_degree)
@@ -950,10 +963,18 @@ mod tests {
         println!("time: {:?}", now.elapsed());
 
         dbg!(sk.measure_noise(&ct3, &mut rng));
+
+        params.plaintext_modulus_op.mul_vec(&mut m1, &m2);
+
+        let res = sk.decrypt(&ct3).decode(Encoding {
+            encoding_type: EncodingType::Simd,
+            level: 0,
+        });
+        assert_eq!(res, m1);
     }
 
     #[test]
     fn trial() {
-        dbg!(BfvParameters::v_norm(3.2, 8));
+        dbg!(BfvParameters::v_norm(3.2, 1 << 15));
     }
 }

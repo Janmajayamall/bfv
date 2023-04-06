@@ -175,6 +175,7 @@ impl Poly {
             } else {
             }
         } else {
+            panic!("Unknown representation");
         }
     }
 
@@ -815,7 +816,7 @@ mod tests {
         let bfv_params = BfvParameters::new(
             &[
                 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
-                60, 60,
+                60, 60, 60, 60, 60, 60, 60,
             ],
             1153,
             8,
@@ -868,10 +869,11 @@ mod tests {
         let mut rng = thread_rng();
         let bfv_params = BfvParameters::new(
             &[
-                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
+                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
+                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
             ],
-            65537,
-            1 << 15,
+            1553,
+            1 << 3,
         );
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
@@ -913,7 +915,8 @@ mod tests {
         izip!(Vec::<BigUint>::from(&q_poly).iter(), q_expected.iter()).for_each(
             |(res, expected)| {
                 let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
-                // dbg!(diff.bits());
+                dbg!(diff.bits());
+                assert!(diff.bits() <= 1);
             },
         );
     }
