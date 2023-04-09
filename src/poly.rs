@@ -67,7 +67,7 @@ impl PolyContext {
         let mut g = vec![];
         moduli.iter().for_each(|qi| {
             let qh = &q / qi;
-            q_hat.push(&qh);
+            q_hat.push(qh.clone());
 
             let qhi = BigUint::from_bytes_le(
                 &(&q_dig / qi)
@@ -77,7 +77,7 @@ impl PolyContext {
                     .unwrap()
                     .to_bytes_le(),
             );
-            q_hat_inv.push(&qhi);
+            q_hat_inv.push(qhi.clone());
             g.push(qh * qhi);
         });
 
@@ -652,6 +652,7 @@ impl Poly {
 
 impl From<&Poly> for Vec<BigUint> {
     fn from(p: &Poly) -> Vec<BigUint> {
+        assert!(p.representation == Representation::Coefficient);
         let mut values = vec![];
         p.coefficients.axis_iter(Axis(1)).for_each(|rests| {
             let mut v = BigUint::zero();
