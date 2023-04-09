@@ -34,9 +34,10 @@ pub struct PolyContext {
     ntt_ops: Box<[NttOperator]>,
     q_hat: Box<[BigUint]>,
     q_hat_inv: Box<[BigUint]>,
+    pub g: Box<[BigUint]>,
     q: BigUint,
     q_dig: BigUintDig,
-    degree: usize,
+    pub degree: usize,
 }
 
 impl PolyContext {
@@ -62,18 +63,22 @@ impl PolyContext {
 
         let mut q_hat = vec![];
         let mut q_hat_inv = vec![];
+        // g = q_hat * q_hat_inv
+        let mut g = vec![];
         moduli.iter().for_each(|qi| {
-            q_hat.push(&q / qi);
+            let qh = &q / qi;
+            q_hat.push(&qh);
 
-            let q_hat = &q_dig / qi;
-            q_hat_inv.push(BigUint::from_bytes_le(
-                &q_hat
+            let qhi = BigUint::from_bytes_le(
+                &(&q_dig / qi)
                     .mod_inverse(BigUintDig::from(*qi))
                     .unwrap()
                     .to_biguint()
                     .unwrap()
                     .to_bytes_le(),
-            ));
+            );
+            q_hat_inv.push(&qhi);
+            g.push(qh * qhi);
         });
 
         PolyContext {
@@ -85,6 +90,7 @@ impl PolyContext {
             q_hat_inv: q_hat_inv.into_boxed_slice(),
             q,
             q_dig,
+            g: g.into_boxed_slice(),
         }
     }
 

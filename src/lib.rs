@@ -9,6 +9,7 @@ use poly::{Poly, PolyContext, Representation};
 use rand::{distributions::Uniform, prelude::Distribution, CryptoRng, RngCore};
 use std::sync::Arc;
 
+mod key_switching_key;
 mod nb_theory;
 mod poly;
 

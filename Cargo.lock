@@ -21,6 +21,7 @@ dependencies = [
  "num-bigint-dig",
  "num-traits",
  "rand",
+ "rand_chacha",
 ]
 
 [[package]]
