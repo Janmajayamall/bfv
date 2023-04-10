@@ -4,7 +4,7 @@ use nb_theory::generate_prime;
 use ndarray::{Array2, MathCell};
 use num_bigint::BigUint;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
-use num_traits::ToPrimitive;
+use num_traits::{Pow, ToPrimitive};
 use poly::{Poly, PolyContext, Representation};
 use rand::{distributions::Uniform, prelude::Distribution, CryptoRng, RngCore};
 use std::sync::Arc;
@@ -80,8 +80,23 @@ impl BfvParameters {
 
         // expansion factor delta
         let delta = 2.0 * (n as f64).sqrt();
+        let f = (2.0_f64).pow(60);
+        dbg!(((delta * bound_error * f * 8.0) as f64 / 2.0).log2());
 
-        (bound_error * (1.0 + 2.0 * delta * bound_key)).log2()
+        (bound_error * (1.0 + 2.0 * delta * bound_key))
+    }
+
+    /// Returns noise in bits from BV key switching operation
+    ///
+    /// Formula for noise estimation taken from B.2.1 of https://eprint.iacr.org/2021/204.
+    pub fn noise_ks(levels: usize, sigma: f64, n: usize, max_qsize: usize) -> usize {
+        let alpha = 36_f64;
+        let bound_error = alpha.sqrt() * sigma;
+
+        let delta = 2.0 * (n as f64).sqrt();
+
+        ((delta * bound_error * (2_f64).pow(max_qsize as f64) * (levels as f64 + 1_f64)) / 2.0)
+            .log2() as usize
     }
 
     /// creates new bfv parameteres with necessary values
@@ -976,6 +991,6 @@ mod tests {
 
     #[test]
     fn trial() {
-        dbg!(BfvParameters::v_norm(3.2, 1 << 15));
+        dbg!(BfvParameters::noise_ks(7, 3.2, 1 << 8, 60));
     }
 }

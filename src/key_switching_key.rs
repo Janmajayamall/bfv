@@ -137,7 +137,11 @@ mod tests {
 
     #[test]
     fn key_switching_works() {
-        let bfv_params = Arc::new(BfvParameters::new(&[60, 60, 60, 60, 60], 65537, 8));
+        let bfv_params = Arc::new(BfvParameters::new(
+            &[60, 60, 60, 60, 60, 60, 60],
+            65537,
+            1 << 8,
+        ));
         let ct_ctx = bfv_params.ciphertext_poly_contexts[0].clone();
         let ksk_ctx = ct_ctx.clone();
 
@@ -159,14 +163,13 @@ mod tests {
         // expected
         other_poly.change_representation(Representation::Evaluation);
         other_poly *= &poly;
-        // other_poly.change_representation(Representation::Coefficient);
 
         res -= &other_poly;
         res.change_representation(Representation::Coefficient);
 
         izip!(Vec::<BigUint>::from(&res).iter(),).for_each(|v| {
             let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.modulus() - v).bits());
-            dbg!(diff_bits);
+            assert!(diff_bits <= 70);
         });
     }
 }
