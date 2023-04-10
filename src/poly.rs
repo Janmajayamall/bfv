@@ -515,8 +515,9 @@ impl Poly {
 
 impl AddAssign<&Poly> for Poly {
     fn add_assign(&mut self, rhs: &Poly) {
-        // Note: Use debug_assert instead of assert since it takes significantly longer trick of just checking arc pointers in stack fails.
+        // Note: Use debug_assert instead of assert since it takes significantly longer if the trick of just checking arc pointers in stack fails.
         debug_assert!(self.context == rhs.context);
+        debug_assert!(self.representation == rhs.representation);
         izip!(
             self.coefficients.outer_iter_mut(),
             rhs.coefficients.outer_iter(),
@@ -538,6 +539,7 @@ impl Add<&Poly> for &Poly {
 impl SubAssign<&Poly> for Poly {
     fn sub_assign(&mut self, rhs: &Poly) {
         debug_assert!(self.context == rhs.context);
+        debug_assert!(self.representation == rhs.representation);
         izip!(
             self.coefficients.outer_iter_mut(),
             rhs.coefficients.outer_iter(),
