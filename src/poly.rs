@@ -31,7 +31,7 @@ pub enum Representation {
 pub struct PolyContext {
     pub moduli: Box<[u64]>,
     pub moduli_ops: Box<[Modulus]>,
-    ntt_ops: Box<[NttOperator]>,
+    pub ntt_ops: Box<[NttOperator]>,
     q_hat: Box<[BigUint]>,
     q_hat_inv: Box<[BigUint]>,
     pub g: Box<[BigUint]>,

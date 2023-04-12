@@ -4,7 +4,7 @@ use nb_theory::generate_prime;
 use ndarray::{Array2, MathCell};
 use num_bigint::BigUint;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
-use num_traits::{Pow, ToPrimitive};
+use num_traits::{One, Pow, ToPrimitive};
 use poly::{Poly, PolyContext, Representation};
 use rand::{distributions::Uniform, prelude::Distribution, CryptoRng, RngCore};
 use std::sync::Arc;
@@ -65,6 +65,7 @@ struct BfvParameters {
     pub ql_hat_inv_modql: Vec<Vec<u64>>,
     pub ql_inv: Vec<Vec<f64>>,
     pub alphal_modp: Vec<Array2<u64>>,
+    // Hybrid key switching
 }
 
 impl BfvParameters {
