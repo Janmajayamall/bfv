@@ -249,6 +249,13 @@ impl HybridKeySwitchingKey {
         }
     }
 
+    pub fn key_switch(&self, poly: &Poly) {
+        debug_assert!(poly.context == self.ksk_ctx);
+        // switch poly from Q to QP
+        // perform key switching
+        // switch results from QP to Q
+    }
+
     pub fn generate_c1(
         count: usize,
         qp_ctx: &Arc<PolyContext>,
