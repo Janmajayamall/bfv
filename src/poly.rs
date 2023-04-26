@@ -113,6 +113,18 @@ pub struct Poly {
 }
 
 impl Poly {
+    pub fn new(
+        coefficients: Array2<u64>,
+        poly_context: &Arc<PolyContext>,
+        representation: Representation,
+    ) -> Poly {
+        Poly {
+            coefficients,
+            representation,
+            context: poly_context.clone(),
+        }
+    }
+
     /// Creates zero polynomial with a given context and representation
     pub fn zero(poly_context: &Arc<PolyContext>, representation: &Representation) -> Poly {
         Poly {
@@ -560,8 +572,6 @@ impl Poly {
         qp_coefficients: &Array2<u64>,
         q_context: &Arc<PolyContext>,
         p_context: &Arc<PolyContext>,
-        p_moduli_ops: &[Modulus],
-        p_ntt_ops: &[NttOperator],
         p_hat_inv_modp: &[u64],
         p_hat_modq: &Array2<u64>,
         p_inv_modq: &[u64],
@@ -570,22 +580,27 @@ impl Poly {
         let p_size = p_context.moduli.len();
         let q_size = qp_size - p_size;
 
-        let q_moduli = q_context.moduli.clone();
+        // Change P part of QP from `Evaluation` to `Coefficient` representation
+        let mut p_to_q_coefficients = Array2::zeros((q_size, q_context.degree));
+        let mut p_coefficients = qp_coefficients.slice(s![q_size.., ..]).to_owned();
+        izip!(p_coefficients.outer_iter_mut(), p_context.ntt_ops.iter()).for_each(
+            |(mut v, ntt_op)| {
+                ntt_op.backward(v.as_slice_mut().unwrap());
+            },
+        );
 
-        // Switch part P of QP to Q using Approximate switch basis
-        let mut q_coefficients = Array2::zeros((q_size, q_context.degree));
         izip!(
-            q_coefficients.axis_iter_mut(Axis(1)),
-            qp_coefficients.axis_iter(Axis(1))
+            p_to_q_coefficients.axis_iter_mut(Axis(1)),
+            p_coefficients.axis_iter(Axis(1))
         )
-        .for_each(|(mut q_rests, qp_rests)| {
+        .for_each(|(mut p_to_q_rests, p_rests)| {
             let mut sum = vec![0u128; q_size];
 
             izip!(
-                qp_rests.slice(s![q_size..]).iter(),
+                p_rests.iter(),
                 p_hat_inv_modp.iter(),
                 p_hat_modq.outer_iter(),
-                p_moduli_ops.iter()
+                p_context.moduli_ops.iter()
             )
             .for_each(|(xi, pi_hat_inv_modpi, pi_hat_modq, modpi)| {
                 let tmp = modpi.mul(*xi, *pi_hat_inv_modpi);
@@ -593,18 +608,32 @@ impl Poly {
                     .for_each(|(vj, pi_hat_modqj)| *vj += (tmp as u128 * *pi_hat_modqj as u128));
             });
 
-            izip!(
-                q_rests.iter_mut(),
-                qp_rests.iter(),
-                sum.iter(),
-                q_moduli.iter(),
-                p_inv_modq.iter(),
-            )
-            .for_each(|(mut qxi, old_xi, switched_xi, qmod, pinv)| {
-                //TODO: replace % with Barret reduction u128 (like openfhe - https://github.com/openfheorg/openfhe-development/blob/303b8c1d67384fa6273180ba7b62d4bc27ea77e3/src/core/lib/lattice/hal/default/dcrtpoly.cpp#L1438)
-                let diff = old_xi - ((switched_xi % (*qmod as u128)) as u64);
-                *qxi = diff * pinv;
-            });
+            izip!(p_to_q_rests.iter_mut(), sum.iter(), q_context.moduli.iter()).for_each(
+                |(xi, xi_u128, modq)| {
+                    *xi = (xi_u128 % (*modq as u128)) as u64;
+                },
+            );
+        });
+
+        // Change P switched to Q part from `Coefficient` to `Evaluation` representation
+        izip!(
+            p_to_q_coefficients.outer_iter_mut(),
+            p_context.ntt_ops.iter()
+        )
+        .for_each(|(mut v, ntt_op)| {
+            ntt_op.forward(v.as_slice_mut().unwrap());
+        });
+
+        let mut q_coefficients = qp_coefficients.slice(s![..q_size, ..]).to_owned();
+        izip!(
+            q_coefficients.outer_iter_mut(),
+            p_to_q_coefficients.outer_iter(),
+            q_context.moduli_ops.iter(),
+            p_inv_modq.iter(),
+        )
+        .for_each(|((mut v, switched_v, modqi, p_inv_modqi))| {
+            modqi.sub_vec(v.as_slice_mut().unwrap(), switched_v.as_slice().unwrap());
+            modqi.scalar_mul_vec(v.as_slice_mut().unwrap(), *p_inv_modqi);
         });
 
         q_coefficients

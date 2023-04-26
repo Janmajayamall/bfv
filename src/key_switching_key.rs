@@ -136,13 +136,18 @@ impl BVKeySwitchingKey {
 
 struct HybridKeySwitchingKey {
     ciphertext_ctx: Arc<PolyContext>,
+    // ksk_ctx is q_ctx
     ksk_ctx: Arc<PolyContext>,
+    p_ctx: Arc<PolyContext>,
     qp_ctx: Arc<PolyContext>,
     seed: <ChaCha8Rng as SeedableRng>::Seed,
     q_hat_inv_modq_parts: Vec<Vec<u64>>,
     q_mod_ops_parts: Vec<Vec<Modulus>>,
     q_hat_modp_parts: Vec<Array2<u64>>,
     p_moduli_parts: Vec<Vec<u64>>,
+    p_hat_inv_modp: Vec<u64>,
+    p_hat_modq: Array2<u64>,
+    p_inv_modq: Vec<u64>,
     dnum: usize,
     alpha: usize,
     c0s: Box<[Poly]>,
@@ -303,15 +308,58 @@ impl HybridKeySwitchingKey {
         let c1s = Self::generate_c1(parts, &qp_ctx, seed);
         let c0s = Self::generate_c0(&c1s, &g, &poly, &sk, rng);
 
+        // Precompute for P to QP
+        let p = p_ctx.modulus();
+        let p_dig = p_ctx.modulus_dig();
+        let mut p_hat_inv_modp = vec![];
+        let mut p_hat_modq = vec![];
+        p_ctx.moduli.iter().for_each(|(pi)| {
+            p_hat_inv_modp.push(
+                (&p_dig / pi)
+                    .mod_inverse(BigUintDig::from_u64(*pi).unwrap())
+                    .unwrap()
+                    .to_biguint()
+                    .unwrap()
+                    .to_u64()
+                    .unwrap(),
+            );
+
+            // pi_hat_modq
+            let p_hat = &p / pi;
+            ksk_ctx
+                .moduli
+                .iter()
+                .for_each(|qi| p_hat_modq.push((&p_hat % qi).to_u64().unwrap()));
+        });
+        let p_hat_modq =
+            Array2::from_shape_vec((p_ctx.moduli.len(), ksk_ctx.moduli.len()), p_hat_modq).unwrap();
+        let mut p_inv_modq = vec![];
+        ksk_ctx.moduli.iter().for_each(|qi| {
+            p_inv_modq.push(
+                p_dig
+                    .clone()
+                    .mod_inverse(BigUintDig::from_u64(*qi).unwrap())
+                    .unwrap()
+                    .to_biguint()
+                    .unwrap()
+                    .to_u64()
+                    .unwrap(),
+            );
+        });
+
         HybridKeySwitchingKey {
             ciphertext_ctx: ciphertext_ctx.clone(),
             ksk_ctx: ksk_ctx.clone(),
+            p_ctx,
             qp_ctx: qp_ctx.clone(),
             seed,
             q_hat_inv_modq_parts,
             q_hat_modp_parts,
             p_moduli_parts,
             q_mod_ops_parts,
+            p_hat_inv_modp,
+            p_hat_modq,
+            p_inv_modq,
             dnum,
             alpha,
             c0s: c0s.into_boxed_slice(),
@@ -319,7 +367,7 @@ impl HybridKeySwitchingKey {
         }
     }
 
-    pub fn key_switch(&self, poly: &Poly) {
+    pub fn key_switch(&self, poly: &Poly) -> Vec<Poly> {
         debug_assert!(poly.representation == Representation::Coefficient);
         debug_assert!(poly.context == self.ciphertext_ctx);
 
@@ -401,7 +449,28 @@ impl HybridKeySwitchingKey {
                 c1_out += &(p * c1i);
             });
 
-        //TODO: switch results from QP to Q
+        // switch results from QP to Q
+        let c0_res = Poly::approx_mod_down(
+            &c0_out.coefficients,
+            &self.ksk_ctx,
+            &self.p_ctx,
+            &self.p_hat_inv_modp,
+            &self.p_hat_modq,
+            &self.p_inv_modq,
+        );
+        let c0_res = Poly::new(c0_res, &self.ksk_ctx, Representation::Evaluation);
+
+        let c1_res = Poly::approx_mod_down(
+            &c1_out.coefficients,
+            &self.ksk_ctx,
+            &self.p_ctx,
+            &self.p_hat_inv_modp,
+            &self.p_hat_modq,
+            &self.p_inv_modq,
+        );
+        let c1_res = Poly::new(c1_res, &self.ksk_ctx, Representation::Evaluation);
+
+        vec![c0_res, c1_res]
     }
 
     pub fn generate_c1(
