@@ -518,41 +518,36 @@ impl Poly {
     ///
     /// Note: the result is approximate since overflow is ignored.
     pub fn approx_switch_crt_basis(
-        &self,
+        q_coefficients: &Array2<u64>,
+        q_moduli_ops: &[Modulus],
+        degree: usize,
         q_hat_inv_modq: &[u64],
         q_hat_modp: &Array2<u64>,
         p_moduli: &[u64],
     ) -> Array2<u64> {
-        let mut p = Array2::<u64>::zeros((p_moduli.len(), self.context.degree));
+        let mut p = Array2::<u64>::zeros((p_moduli.len(), degree));
 
-        // let p_ops = p_moduli
-        //     .iter()
-        //     .map(|p| Modulus::new(*p).unwrap())
-        //     .collect_vec();
+        izip!(p.axis_iter_mut(Axis(1)), q_coefficients.axis_iter(Axis(1))).for_each(
+            |(mut p_rests, q_rests)| {
+                let mut sum = vec![0u128; p_moduli.len()];
+                izip!(
+                    q_rests.iter(),
+                    q_hat_inv_modq.iter(),
+                    q_hat_modp.outer_iter(),
+                    q_moduli_ops.iter()
+                )
+                .for_each(|(xi, qi_hat_inv_modqi, qi_hat_modp, modqi)| {
+                    let tmp = modqi.mul(*xi, *qi_hat_inv_modqi);
+                    izip!(sum.iter_mut(), qi_hat_modp.iter(), p_moduli.iter()).for_each(
+                        |(vj, qi_hat_modpj, modpj)| *vj += (tmp as u128 * *qi_hat_modpj as u128),
+                    );
+                });
 
-        izip!(
-            p.axis_iter_mut(Axis(1)),
-            self.coefficients.axis_iter(Axis(1))
-        )
-        .for_each(|(mut p_rests, q_rests)| {
-            let mut sum = vec![0u128; p_moduli.len()];
-            izip!(
-                q_rests.iter(),
-                q_hat_inv_modq.iter(),
-                q_hat_modp.outer_iter(),
-                self.context.moduli_ops.iter()
-            )
-            .for_each(|(xi, qi_hat_inv_modqi, qi_hat_modp, modqi)| {
-                let tmp = modqi.mul(*xi, *qi_hat_inv_modqi);
-                izip!(sum.iter_mut(), qi_hat_modp.iter(), p_moduli.iter()).for_each(
-                    |(vj, qi_hat_modpj, modpj)| *vj += (tmp as u128 * *qi_hat_modpj as u128),
-                );
-            });
-
-            //TODO: replace % with Barret reduction u128 (like openfhe - https://github.com/openfheorg/openfhe-development/blob/303b8c1d67384fa6273180ba7b62d4bc27ea77e3/src/core/lib/lattice/hal/default/dcrtpoly.cpp#L1438)
-            izip!(p_rests.iter_mut(), sum.iter(), p_moduli.iter())
-                .for_each(|(vj, vj_u128, modpj)| *vj = (*vj_u128 % (*modpj as u128)) as u64);
-        });
+                //TODO: replace % with Barret reduction u128 (like openfhe - https://github.com/openfheorg/openfhe-development/blob/303b8c1d67384fa6273180ba7b62d4bc27ea77e3/src/core/lib/lattice/hal/default/dcrtpoly.cpp#L1438)
+                izip!(p_rests.iter_mut(), sum.iter(), p_moduli.iter())
+                    .for_each(|(vj, vj_u128, modpj)| *vj = (*vj_u128 % (*modpj as u128)) as u64);
+            },
+        );
         p
     }
 }
@@ -977,8 +972,9 @@ mod tests {
     #[test]
     pub fn test_approx_switch_crt_basis() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::new(&[60], 1153, 8);
-        let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
+        let bfv_params = BfvParameters::new(&[60, 60, 60, 60, 60], 1153, 8);
+
+        let q_context = bfv_params.ciphertext_poly_contexts[4].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
         let p_moduli = p_context.moduli.clone();
         let mut p_poly = Poly::zero(&p_context, &Representation::Coefficient);
@@ -1008,8 +1004,14 @@ mod tests {
 
         let mut rng = thread_rng();
         let q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
-        let p_coefficients =
-            q_poly.approx_switch_crt_basis(&q_hat_inv_modq, &q_hat_modp, &p_moduli);
+        let p_coefficients = Poly::approx_switch_crt_basis(
+            &q_poly.coefficients,
+            &q_context.moduli_ops,
+            q_context.degree,
+            &q_hat_inv_modq,
+            &q_hat_modp,
+            &p_moduli,
+        );
         p_poly.coefficients = p_coefficients;
         // dbg!(&p_poly.coefficients);
 
@@ -1026,7 +1028,7 @@ mod tests {
             })
             .collect_vec();
         izip!(Vec::<BigUint>::from(&p_poly).iter(), p_expected.iter()).for_each(|(r, e)| {
-            let diff = r.to_bigint().unwrap() - e.to_bigint().unwrap();
+            let mut diff = r.to_bigint().unwrap() - e.to_bigint().unwrap();
             dbg!(diff.bits());
         })
     }
