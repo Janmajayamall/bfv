@@ -164,7 +164,7 @@ impl HybridKeySwitchingKey {
         let dnum = 3;
         let aux_bits = 60;
 
-        debug_assert!(ciphertext_ctx == poly.context);
+        debug_assert!(ciphertext_ctx == &poly.context);
 
         let alpha = (ciphertext_ctx.moduli.len() + (dnum >> 2)) / dnum;
 
@@ -397,12 +397,11 @@ impl HybridKeySwitchingKey {
         izip!(poly_parts_qp.iter(), self.c0s.iter(), self.c1s.iter())
             .skip(1)
             .for_each(|(p, c0i, c1i)| {
-                c0_out += &(&p * &c0i);
-                c1_out += &(&p * &c1i);
+                c0_out += &(p * c0i);
+                c1_out += &(p * c1i);
             });
 
         //TODO: switch results from QP to Q
-        
     }
 
     pub fn generate_c1(

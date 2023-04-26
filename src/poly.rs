@@ -550,6 +550,65 @@ impl Poly {
         );
         p
     }
+
+    /// Approx mod down
+    ///
+    /// Switches modulus from QP to Q and divides the result by P.
+    /// Uses approx mod switch to switch from P to Q resulting in additional uP. However,
+    /// we get rid uP by dividing the final value by P.
+    pub fn approx_mod_down(
+        qp_coefficients: &Array2<u64>,
+        q_context: &Arc<PolyContext>,
+        p_context: &Arc<PolyContext>,
+        p_moduli_ops: &[Modulus],
+        p_ntt_ops: &[NttOperator],
+        p_hat_inv_modp: &[u64],
+        p_hat_modq: &Array2<u64>,
+        p_inv_modq: &[u64],
+    ) -> Array2<u64> {
+        let qp_size = qp_coefficients.shape()[0];
+        let p_size = p_context.moduli.len();
+        let q_size = qp_size - p_size;
+
+        let q_moduli = q_context.moduli.clone();
+
+        // Switch part P of QP to Q using Approximate switch basis
+        let mut q_coefficients = Array2::zeros((q_size, q_context.degree));
+        izip!(
+            q_coefficients.axis_iter_mut(Axis(1)),
+            qp_coefficients.axis_iter(Axis(1))
+        )
+        .for_each(|(mut q_rests, qp_rests)| {
+            let mut sum = vec![0u128; q_size];
+
+            izip!(
+                qp_rests.slice(s![q_size..]).iter(),
+                p_hat_inv_modp.iter(),
+                p_hat_modq.outer_iter(),
+                p_moduli_ops.iter()
+            )
+            .for_each(|(xi, pi_hat_inv_modpi, pi_hat_modq, modpi)| {
+                let tmp = modpi.mul(*xi, *pi_hat_inv_modpi);
+                izip!(sum.iter_mut(), pi_hat_modq.iter())
+                    .for_each(|(vj, pi_hat_modqj)| *vj += (tmp as u128 * *pi_hat_modqj as u128));
+            });
+
+            izip!(
+                q_rests.iter_mut(),
+                qp_rests.iter(),
+                sum.iter(),
+                q_moduli.iter(),
+                p_inv_modq.iter(),
+            )
+            .for_each(|(mut qxi, old_xi, switched_xi, qmod, pinv)| {
+                //TODO: replace % with Barret reduction u128 (like openfhe - https://github.com/openfheorg/openfhe-development/blob/303b8c1d67384fa6273180ba7b62d4bc27ea77e3/src/core/lib/lattice/hal/default/dcrtpoly.cpp#L1438)
+                let diff = old_xi - ((switched_xi % (*qmod as u128)) as u64);
+                *qxi = diff * pinv;
+            });
+        });
+
+        q_coefficients
+    }
 }
 
 impl AddAssign<&Poly> for Poly {
