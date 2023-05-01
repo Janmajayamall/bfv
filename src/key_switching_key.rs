@@ -171,8 +171,9 @@ impl HybridKeySwitchingKey {
 
         debug_assert!(ciphertext_ctx == &poly.context);
 
-        let alpha = (ciphertext_ctx.moduli.len() + (dnum >> 2)) / dnum;
-
+        //FIXME: handle the case ciphertext_ctx % dnum is not 0
+        let alpha = (ciphertext_ctx.moduli.len() + (dnum >> 1)) / dnum;
+        dbg!(alpha, ciphertext_ctx.moduli.len());
         let ksk_ctx = poly.context.clone();
 
         // generate special moduli P
@@ -199,9 +200,9 @@ impl HybridKeySwitchingKey {
         for _ in 0..size_p {
             loop {
                 if let Some(prime) =
-                    generate_prime(aux_bits, (2 * ksk_ctx.degree) as u64, 1 << aux_bits)
+                    generate_prime(aux_bits, (2 * ksk_ctx.degree) as u64, upper_bound)
                 {
-                    if !p_moduli.contains(&prime) && !ksk_ctx.moduli.contains(&prime) {
+                    if p_moduli.contains(&prime) || ksk_ctx.moduli.contains(&prime) {
                         upper_bound = prime;
                     } else {
                         p_moduli.push(prime);
@@ -212,6 +213,9 @@ impl HybridKeySwitchingKey {
                 }
             }
         }
+
+        dbg!(&p_moduli);
+
         let p_ctx = Arc::new(PolyContext::new(&p_moduli, ksk_ctx.degree));
         let mut p = p_ctx.modulus();
 
@@ -276,6 +280,12 @@ impl HybridKeySwitchingKey {
                     }
                 };
                 let p_whole = [p_start, p_mid, p_moduli.clone()].concat();
+                // dbg!();
+                // dbg!(&q_moduli);
+                // dbg!(&q_parts_moduli);
+                // dbg!(&p_moduli);
+                // dbg!(&p_whole);
+                // dbg!();
                 let mut q_hat_modp = vec![];
                 q_parts_moduli.iter().for_each(|qji| {
                     p_whole.iter().for_each(|pk| {
@@ -367,7 +377,7 @@ impl HybridKeySwitchingKey {
         }
     }
 
-    pub fn key_switch(&self, poly: &Poly) -> Vec<Poly> {
+    pub fn switch(&self, poly: &Poly) -> Vec<Poly> {
         debug_assert!(poly.representation == Representation::Coefficient);
         debug_assert!(poly.context == self.ciphertext_ctx);
 
@@ -388,7 +398,7 @@ impl HybridKeySwitchingKey {
                 }
             };
             let mut parts_count = qj_coefficients.shape()[0];
-
+            dbg!(&parts_count);
             let mut p_whole_coefficients = Poly::approx_switch_crt_basis(
                 &qj_coefficients,
                 &self.q_mod_ops_parts[i],
@@ -452,7 +462,7 @@ impl HybridKeySwitchingKey {
         // switch results from QP to Q
         let c0_res = Poly::approx_mod_down(
             &c0_out.coefficients,
-            &self.ksk_ctx,
+            &self.qp_ctx,
             &self.p_ctx,
             &self.p_hat_inv_modp,
             &self.p_hat_modq,
@@ -462,7 +472,7 @@ impl HybridKeySwitchingKey {
 
         let c1_res = Poly::approx_mod_down(
             &c1_out.coefficients,
-            &self.ksk_ctx,
+            &self.qp_ctx,
             &self.p_ctx,
             &self.p_hat_inv_modp,
             &self.p_hat_modq,
@@ -614,6 +624,40 @@ mod tests {
         izip!(Vec::<BigUint>::from(&res).iter(),).for_each(|v| {
             let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.modulus() - v).bits());
             assert!(diff_bits <= 70);
+        });
+    }
+
+    #[test]
+    fn hybrid_key_switching() {
+        let bfv_params = Arc::new(BfvParameters::new(&[60, 60, 60, 60, 60, 60], 65537, 1 << 3));
+        let ct_ctx = bfv_params.ciphertext_poly_contexts[0].clone();
+        let ksk_ctx = ct_ctx.clone();
+
+        let mut rng = thread_rng();
+
+        let sk = SecretKey::random(&bfv_params, &mut rng);
+
+        let poly = Poly::random(&ksk_ctx, &Representation::Evaluation, &mut rng);
+        let ksk = HybridKeySwitchingKey::new(&poly, &sk, &ct_ctx, &mut rng);
+
+        let mut other_poly = Poly::random(&ct_ctx, &Representation::Coefficient, &mut rng);
+        let cs = ksk.switch(&other_poly);
+
+        let mut sk_poly =
+            Poly::try_convert_from_i64(&sk.coefficients, &ksk_ctx, &Representation::Coefficient);
+        sk_poly.change_representation(Representation::Evaluation);
+        let mut res = &cs[0] + &(&cs[1] * &sk_poly);
+
+        // expected
+        other_poly.change_representation(Representation::Evaluation);
+        other_poly *= &poly;
+
+        res -= &other_poly;
+        res.change_representation(Representation::Coefficient);
+
+        izip!(Vec::<BigUint>::from(&res).iter(),).for_each(|v| {
+            let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.modulus() - v).bits());
+            dbg!(diff_bits);
         });
     }
 }

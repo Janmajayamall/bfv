@@ -22,11 +22,6 @@ pub enum Representation {
     Unknown,
 }
 
-/// 1. moduli: all the modulus in poly
-/// 2. modulus structs for each moduli to perform operations
-/// 3. ntt structs for each moduli to perform ntt operations
-/// 4. q_hats and q_hat_invs
-///
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PolyContext {
     pub moduli: Box<[u64]>,
@@ -550,9 +545,11 @@ impl Poly {
                 )
                 .for_each(|(xi, qi_hat_inv_modqi, qi_hat_modp, modqi)| {
                     let tmp = modqi.mul(*xi, *qi_hat_inv_modqi);
-                    izip!(sum.iter_mut(), qi_hat_modp.iter(), p_moduli.iter()).for_each(
-                        |(vj, qi_hat_modpj, modpj)| *vj += (tmp as u128 * *qi_hat_modpj as u128),
-                    );
+                    izip!(sum.iter_mut(), qi_hat_modp.iter(), p_moduli.iter())
+                        .skip(1)
+                        .for_each(|(vj, qi_hat_modpj, modpj)| {
+                            *vj += (tmp as u128 * *qi_hat_modpj as u128)
+                        });
                 });
 
                 //TODO: replace % with Barret reduction u128 (like openfhe - https://github.com/openfheorg/openfhe-development/blob/303b8c1d67384fa6273180ba7b62d4bc27ea77e3/src/core/lib/lattice/hal/default/dcrtpoly.cpp#L1438)
@@ -570,7 +567,7 @@ impl Poly {
     /// we get rid uP by dividing the final value by P.
     pub fn approx_mod_down(
         qp_coefficients: &Array2<u64>,
-        q_context: &Arc<PolyContext>,
+        qp_context: &Arc<PolyContext>,
         p_context: &Arc<PolyContext>,
         p_hat_inv_modp: &[u64],
         p_hat_modq: &Array2<u64>,
@@ -581,13 +578,17 @@ impl Poly {
         let q_size = qp_size - p_size;
 
         // Change P part of QP from `Evaluation` to `Coefficient` representation
-        let mut p_to_q_coefficients = Array2::zeros((q_size, q_context.degree));
+        let mut p_to_q_coefficients = Array2::zeros((q_size, qp_context.degree));
         let mut p_coefficients = qp_coefficients.slice(s![q_size.., ..]).to_owned();
-        izip!(p_coefficients.outer_iter_mut(), p_context.ntt_ops.iter()).for_each(
-            |(mut v, ntt_op)| {
-                ntt_op.backward(v.as_slice_mut().unwrap());
-            },
-        );
+        assert!(p_coefficients.shape()[0] == p_context.ntt_ops.len());
+        izip!(
+            p_coefficients.outer_iter_mut(),
+            // skip first `q_size` ntt ops
+            qp_context.ntt_ops.iter().skip(q_size)
+        )
+        .for_each(|(mut v, ntt_op)| {
+            ntt_op.backward(v.as_slice_mut().unwrap());
+        });
 
         izip!(
             p_to_q_coefficients.axis_iter_mut(Axis(1)),
@@ -603,39 +604,49 @@ impl Poly {
                 p_context.moduli_ops.iter()
             )
             .for_each(|(xi, pi_hat_inv_modpi, pi_hat_modq, modpi)| {
-                let tmp = modpi.mul(*xi, *pi_hat_inv_modpi);
-                izip!(sum.iter_mut(), pi_hat_modq.iter())
-                    .for_each(|(vj, pi_hat_modqj)| *vj += (tmp as u128 * *pi_hat_modqj as u128));
+                let tmp = modpi.mul(*xi, *pi_hat_inv_modpi) as u128;
+                izip!(
+                    sum.iter_mut(),
+                    pi_hat_modq.iter(),
+                    qp_context.moduli_ops.iter()
+                )
+                .for_each(|(vj, pi_hat_modqj, modq)| {
+                    *vj += tmp * *pi_hat_modqj as u128;
+                });
             });
 
-            izip!(p_to_q_rests.iter_mut(), sum.iter(), q_context.moduli.iter()).for_each(
-                |(xi, xi_u128, modq)| {
-                    *xi = (xi_u128 % (*modq as u128)) as u64;
-                },
-            );
+            izip!(
+                p_to_q_rests.iter_mut(),
+                sum.iter(),
+                qp_context.moduli.iter()
+            )
+            .for_each(|(xi, xi_u128, modq)| {
+                *xi = (xi_u128 % (*modq as u128)) as u64;
+            });
         });
 
         // Change P switched to Q part from `Coefficient` to `Evaluation` representation
+        // Reason to switch from coefficient to evaluation form becomes apparent in next step when we multiply all values by 1/P
         izip!(
             p_to_q_coefficients.outer_iter_mut(),
-            p_context.ntt_ops.iter()
+            qp_context.ntt_ops.iter()
         )
         .for_each(|(mut v, ntt_op)| {
             ntt_op.forward(v.as_slice_mut().unwrap());
         });
 
         let mut q_coefficients = qp_coefficients.slice(s![..q_size, ..]).to_owned();
+        assert!(q_coefficients.shape()[0] == q_size);
         izip!(
             q_coefficients.outer_iter_mut(),
-            p_to_q_coefficients.outer_iter(),
-            q_context.moduli_ops.iter(),
+            p_to_q_coefficients.outer_iter_mut(),
+            qp_context.moduli_ops.iter(),
             p_inv_modq.iter(),
         )
-        .for_each(|((mut v, switched_v, modqi, p_inv_modqi))| {
+        .for_each(|((mut v, mut switched_v, modqi, p_inv_modqi))| {
             modqi.sub_vec(v.as_slice_mut().unwrap(), switched_v.as_slice().unwrap());
             modqi.scalar_mul_vec(v.as_slice_mut().unwrap(), *p_inv_modqi);
         });
-
         q_coefficients
     }
 }
@@ -812,6 +823,29 @@ mod tests {
 
     use super::*;
     use crate::{nb_theory::generate_prime, BfvParameters};
+
+    fn generate_primes(sizes: &[usize], polynomial_degree: usize, skip_list: &[u64]) -> Vec<u64> {
+        let mut moduli = vec![];
+        sizes.iter().for_each(|size| {
+            let mut upper_bound = 1u64 << size;
+            loop {
+                if let Some(prime) =
+                    generate_prime(*size, 2 * polynomial_degree as u64, upper_bound)
+                {
+                    if !moduli.contains(&prime) && !skip_list.contains(&prime) {
+                        moduli.push(prime);
+                        break;
+                    } else {
+                        upper_bound = prime;
+                    }
+                } else {
+                    // not enough primes
+                    panic!("Not enough primes!");
+                }
+            }
+        });
+        moduli
+    }
 
     #[test]
     fn test_scale_and_roun1d_decryption() {
@@ -1064,6 +1098,10 @@ mod tests {
 
         let q_context = bfv_params.ciphertext_poly_contexts[4].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
+
+        dbg!(&q_context.moduli);
+        dbg!(&p_context.moduli);
+
         let p_moduli = p_context.moduli.clone();
         let mut p_poly = Poly::zero(&p_context, &Representation::Coefficient);
 
@@ -1105,7 +1143,20 @@ mod tests {
 
         let q = q_context.modulus();
         let p = p_context.modulus();
-        let p_expected = Vec::<BigUint>::from(&q_poly)
+        dbg!(&q);
+        dbg!(&p);
+        let p_res: Vec<BigUint> = Vec::<BigUint>::from(&p_poly)
+            .iter()
+            .map(|xi| {
+                if xi >= &(&p >> 1) {
+                    &p - ((((&p - xi) + (&q >> 1)) / &q) % &p)
+                } else {
+                    ((xi + (&q >> 1)) / &q) % &p
+                }
+            })
+            .collect_vec();
+
+        let p_expected: Vec<BigUint> = Vec::<BigUint>::from(&q_poly)
             .iter()
             .map(|xi| {
                 if xi >= &(&q >> 1) {
@@ -1114,10 +1165,146 @@ mod tests {
                     xi % &p
                 }
             })
+            .map(|xi| {
+                if &xi >= &(&p >> 1) {
+                    &p - ((((&p - xi) + (&q >> 1)) / &q) % &p)
+                } else {
+                    ((xi + (&q >> 1)) / &q) % &p
+                }
+            })
             .collect_vec();
-        izip!(Vec::<BigUint>::from(&p_poly).iter(), p_expected.iter()).for_each(|(r, e)| {
+        izip!(p_res.iter(), p_expected.iter()).for_each(|(r, e)| {
             let mut diff = r.to_bigint().unwrap() - e.to_bigint().unwrap();
-            dbg!(diff.bits());
+            dbg!(r, e, &diff, diff.bits());
         })
+    }
+
+    #[test]
+    pub fn test_approx_mod_down() {
+        let mut rng = thread_rng();
+        let polynomial_degree = 8;
+        let q_moduli = generate_primes(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
+        let p_moduli = generate_primes(&vec![60, 60], polynomial_degree, &q_moduli);
+        let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
+
+        let q_context = Arc::new(PolyContext::new(&q_moduli, polynomial_degree));
+        let p_context = Arc::new(PolyContext::new(&p_moduli, polynomial_degree));
+        let qp_context = Arc::new(PolyContext::new(&qp_moduli, polynomial_degree));
+
+        // just few checks
+        let q_size = q_context.moduli.len();
+        let p_size = p_context.moduli.len();
+        let qp_size = q_size + p_size;
+        izip!(
+            qp_context.moduli_ops.iter().skip(q_size),
+            p_context.moduli_ops.iter()
+        )
+        .for_each(|(a, b)| {
+            assert_eq!(a, b);
+        });
+        izip!(
+            qp_context.ntt_ops.iter().skip(q_size),
+            p_context.ntt_ops.iter()
+        )
+        .for_each(|(a, b)| {
+            assert_eq!(a, b);
+        });
+
+        // Pre computation
+        let p = p_context.modulus();
+        let p_dig = p_context.modulus_dig();
+        let mut p_hat_inv_modp = vec![];
+        let mut p_hat_modq = vec![];
+        p_context.moduli.iter().for_each(|(pi)| {
+            p_hat_inv_modp.push(
+                (&p_dig / pi)
+                    .mod_inverse(BigUintDig::from_u64(*pi).unwrap())
+                    .unwrap()
+                    .to_biguint()
+                    .unwrap()
+                    .to_u64()
+                    .unwrap(),
+            );
+
+            // pi_hat_modq
+            let p_hat = &p / pi;
+            q_context
+                .moduli
+                .iter()
+                .for_each(|qi| p_hat_modq.push((&p_hat % qi).to_u64().unwrap()));
+        });
+        let p_hat_modq =
+            Array2::from_shape_vec((p_context.moduli.len(), q_context.moduli.len()), p_hat_modq)
+                .unwrap();
+        let mut p_inv_modq = vec![];
+        q_context.moduli.iter().for_each(|qi| {
+            p_inv_modq.push(
+                p_dig
+                    .clone()
+                    .mod_inverse(BigUintDig::from_u64(*qi).unwrap())
+                    .unwrap()
+                    .to_biguint()
+                    .unwrap()
+                    .to_u64()
+                    .unwrap(),
+            );
+        });
+
+        let mut qp_poly = Poly::random(&qp_context, &Representation::Evaluation, &mut rng);
+        let q_coefficients_res = Poly::approx_mod_down(
+            &qp_poly.coefficients,
+            &qp_context,
+            &p_context,
+            &p_hat_inv_modp,
+            &p_hat_modq,
+            &p_inv_modq,
+        );
+        let mut q_res = Poly::new(q_coefficients_res, &q_context, Representation::Evaluation);
+        q_res.change_representation(Representation::Coefficient);
+
+        qp_poly.change_representation(Representation::Coefficient);
+
+        let q_poly = {
+            let coeff = qp_poly.coefficients.slice(s![..q_size, ..]).to_owned();
+            assert!(coeff.shape()[0] == q_size);
+            Poly::new(coeff, &q_context, Representation::Coefficient)
+        };
+        let p_poly = {
+            let coeff = qp_poly.coefficients.slice(s![q_size.., ..]).to_owned();
+            assert!(coeff.shape()[0] == p_size);
+            Poly::new(coeff, &p_context, Representation::Coefficient)
+        };
+
+        let qp = qp_context.modulus();
+        let q = q_context.modulus();
+        let p = p_context.modulus();
+        let p_inv_modq = {
+            let dig = p_context
+                .modulus_dig()
+                .mod_inverse(BigUintDig::from_bytes_le(&q.to_bytes_le()))
+                .unwrap()
+                .to_biguint()
+                .unwrap();
+
+            BigUint::from_bytes_le(&dig.to_bytes_le())
+        };
+
+        // convert p_poly to q
+        let q_expected = izip!(
+            Vec::<BigUint>::from(&q_poly).iter(),
+            Vec::<BigUint>::from(&p_poly).iter()
+        )
+        .map(|(qv, pv)| ((qv - pv) * &p_inv_modq) % &q)
+        .collect_vec();
+
+        let q_res: Vec<BigUint> = Vec::<BigUint>::from(&q_res)
+            .iter()
+            .map(|xi| xi.clone())
+            .collect_vec();
+
+        izip!(q_res.iter(), q_expected.iter()).for_each(|(res, expected)| {
+            let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
+            dbg!(diff.bits());
+        });
     }
 }
