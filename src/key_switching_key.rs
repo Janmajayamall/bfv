@@ -135,7 +135,6 @@ impl BVKeySwitchingKey {
 }
 
 struct HybridKeySwitchingKey {
-    ciphertext_ctx: Arc<PolyContext>,
     // ksk_ctx is q_ctx
     ksk_ctx: Arc<PolyContext>,
     p_ctx: Arc<PolyContext>,
@@ -159,28 +158,28 @@ impl HybridKeySwitchingKey {
     /// a limitation of hybrid key switching, instead a limitation of the way key switching is
     /// implemented here.
     /// Let's say ciphertext ctx = Q' and ksk ctx = Q. The extended ctx should be QP. To speed things
-    /// up during `key_switch` operation, we assume Q == Q' because we extend poly from Qj to Q[..i*dnum] + Q[(i+1)*dnum..] + P.
+    /// up during `key_switch` operation, we assume Q == Q' because we extend poly from Qj to Q[..i*alpha] + Q[(i+1)*alpha..] + P.
     pub fn new<R: CryptoRng + CryptoRngCore>(
         poly: &Poly,
         sk: &SecretKey,
         ciphertext_ctx: &Arc<PolyContext>,
         rng: &mut R,
     ) -> HybridKeySwitchingKey {
-        let dnum = 3;
+        // alpha ~= `k` (k = moduli of P)
+        let alpha = 3;
         let aux_bits = 60;
 
         debug_assert!(ciphertext_ctx == &poly.context);
 
-        //FIXME: handle the case ciphertext_ctx % dnum is not 0
-        let alpha = (ciphertext_ctx.moduli.len() + (dnum >> 1)) / dnum;
-        dbg!(alpha, ciphertext_ctx.moduli.len());
+        let dnum = (ciphertext_ctx.moduli.len() as f64 / alpha as f64).ceil() as usize;
         let ksk_ctx = poly.context.clone();
 
+        // Q: How can we improve API and move all pre-comp stuff to some other place?
         // generate special moduli P
         let mut qj = vec![];
         ciphertext_ctx
             .moduli
-            .chunks(dnum)
+            .chunks(alpha)
             .for_each(|q_parts_moduli| {
                 // Qj
                 let mut qji = BigUint::one();
@@ -194,6 +193,7 @@ impl HybridKeySwitchingKey {
             maxbits = std::cmp::max(maxbits, q.bits());
         });
         let size_p = (maxbits as f64 / aux_bits as f64).ceil() as usize;
+        debug_assert!(size_p == alpha);
         let mut p_moduli = vec![];
         let mut upper_bound = 1 << aux_bits;
         for _ in 0..size_p {
@@ -216,20 +216,20 @@ impl HybridKeySwitchingKey {
         let p_ctx = Arc::new(PolyContext::new(&p_moduli, ksk_ctx.degree));
         let mut p = p_ctx.modulus();
 
-        // TODO: move all pre-computation stuff to some other place.
+        // Calculating g values + Pre-comp for switching Qj to QP.
         let q = ciphertext_ctx.modulus();
         let q_dig = ciphertext_ctx.modulus_dig();
         let q_moduli = ciphertext_ctx.moduli.clone();
         // g = P * Qj_hat * Qj_hat_inv_modQj
         let mut g = vec![];
-        // FIXME: we use 2d Vec instead of Array2 because the last part may contain less than dnum qis.
+        // FIXME: we use 2d Vec instead of Array2 because the last part may contain less than alpha qis.
         // But this isn't acceptable. Change this to Array2 and adjust for last part somehow.
         let mut q_hat_inv_modq_parts = vec![];
         let mut q_hat_modp_parts = vec![];
         let mut p_moduli_parts = vec![];
         let mut q_mod_ops_parts = vec![];
         q_moduli
-            .chunks(dnum)
+            .chunks(alpha)
             .enumerate()
             .for_each(|(chunk_index, q_parts_moduli)| {
                 // Qj
@@ -254,7 +254,7 @@ impl HybridKeySwitchingKey {
                 );
                 g.push(&p * qj_hat * qj_hat_inv_modqj);
 
-                // for approx_switch_crt_basis
+                // precomp approx_switch_crt_basis
                 let mut qj_hat_inv_modqj = vec![];
                 q_parts_moduli.iter().for_each(|qji| {
                     let qji_hat_inv_modqji = (&qj_dig / *qji)
@@ -268,10 +268,10 @@ impl HybridKeySwitchingKey {
                 });
                 q_hat_inv_modq_parts.push(qj_hat_inv_modqj);
 
-                let p_start = q_moduli[..dnum * chunk_index].to_vec();
+                let p_start = q_moduli[..alpha * chunk_index].to_vec();
                 let p_mid = {
-                    if (dnum * (chunk_index + 1)) < q_moduli.len() {
-                        q_moduli[(dnum * (chunk_index + 1))..].to_vec()
+                    if (alpha * (chunk_index + 1)) < q_moduli.len() {
+                        q_moduli[(alpha * (chunk_index + 1))..].to_vec()
                     } else {
                         vec![]
                     }
@@ -293,12 +293,9 @@ impl HybridKeySwitchingKey {
                 q_hat_modp_parts.push(q_hat_modp);
                 p_moduli_parts.push(p_whole);
             });
-        ciphertext_ctx
-            .moduli_ops
-            .chunks(dnum)
-            .for_each(|q_mod_ops| {
-                q_mod_ops_parts.push(q_mod_ops.to_vec());
-            });
+        ksk_ctx.moduli_ops.chunks(alpha).for_each(|q_mod_ops| {
+            q_mod_ops_parts.push(q_mod_ops.to_vec());
+        });
 
         let parts = g.len();
 
@@ -311,7 +308,7 @@ impl HybridKeySwitchingKey {
         let c1s = Self::generate_c1(parts, &qp_ctx, seed);
         let c0s = Self::generate_c0(&c1s, &g, &poly, &sk, rng);
 
-        // Precompute for P to QP
+        // Precompute for P to Q (approx_mod_down)
         let p = p_ctx.modulus();
         let p_dig = p_ctx.modulus_dig();
         let mut p_hat_inv_modp = vec![];
@@ -337,6 +334,7 @@ impl HybridKeySwitchingKey {
         let p_hat_modq =
             Array2::from_shape_vec((p_ctx.moduli.len(), ksk_ctx.moduli.len()), p_hat_modq).unwrap();
         let mut p_inv_modq = vec![];
+        // Precompute for dividing values in basis Q by P (approx_mod_down)
         ksk_ctx.moduli.iter().for_each(|qi| {
             p_inv_modq.push(
                 p_dig
@@ -349,9 +347,8 @@ impl HybridKeySwitchingKey {
                     .unwrap(),
             );
         });
-        dbg!(&q_hat_inv_modq_parts);
+
         HybridKeySwitchingKey {
-            ciphertext_ctx: ciphertext_ctx.clone(),
             ksk_ctx: ksk_ctx.clone(),
             p_ctx,
             qp_ctx: qp_ctx.clone(),
@@ -372,21 +369,21 @@ impl HybridKeySwitchingKey {
 
     pub fn switch(&self, poly: &Poly) -> Vec<Poly> {
         debug_assert!(poly.representation == Representation::Coefficient);
-        debug_assert!(poly.context == self.ciphertext_ctx);
+        debug_assert!(poly.context == self.ksk_ctx);
 
         // divide poly into parts and switch them from Qj to QP
         let mut poly_parts_qp = vec![];
-        for i in 0..self.alpha {
+        for i in 0..self.dnum {
             let mut qp_poly = Poly::zero(&self.qp_ctx, &Representation::Coefficient);
 
             let qj_coefficients = {
-                if (i + 1) == self.alpha {
+                if (i + 1) == self.dnum {
                     poly.coefficients
-                        .slice(s![(i * self.dnum).., ..])
+                        .slice(s![(i * self.alpha).., ..])
                         .to_owned()
                 } else {
                     poly.coefficients
-                        .slice(s![(i * self.dnum)..((i + 1) * self.dnum), ..])
+                        .slice(s![(i * self.alpha)..((i + 1) * self.alpha), ..])
                         .to_owned()
                 }
             };
@@ -403,8 +400,8 @@ impl HybridKeySwitchingKey {
 
             // ..p_start
             izip!(
-                qp_poly.coefficients.outer_iter_mut().take(i * self.dnum),
-                p_whole_coefficients.outer_iter().take(i * self.dnum)
+                qp_poly.coefficients.outer_iter_mut().take(i * self.alpha),
+                p_whole_coefficients.outer_iter().take(i * self.alpha)
             )
             .for_each(|(mut qpi, pi)| {
                 qpi.as_slice_mut()
@@ -414,7 +411,7 @@ impl HybridKeySwitchingKey {
 
             // p_start..p_start+qj
             izip!(
-                qp_poly.coefficients.outer_iter_mut().skip(i * self.dnum),
+                qp_poly.coefficients.outer_iter_mut().skip(i * self.alpha),
                 qj_coefficients.outer_iter()
             )
             .for_each(|(mut qpi, qj)| {
@@ -428,8 +425,8 @@ impl HybridKeySwitchingKey {
                 qp_poly
                     .coefficients
                     .outer_iter_mut()
-                    .skip(i * self.dnum + parts_count),
-                p_whole_coefficients.outer_iter().skip(i * self.dnum)
+                    .skip(i * self.alpha + parts_count),
+                p_whole_coefficients.outer_iter().skip(i * self.alpha)
             )
             .for_each(|(mut qpi, pi)| {
                 qpi.as_slice_mut()
@@ -508,10 +505,10 @@ impl HybridKeySwitchingKey {
                 let mut e = Poly::random_gaussian(&qp_ctx, &Representation::Coefficient, 10, rng);
                 e.change_representation(Representation::Evaluation);
 
-                // An alternate to this will to be extend poly from Q to QP and calculate c0 = g * poly + e - (c1*sk). However there are two drawbacks to this:
+                // An alternate to this will be to extend poly from Q to QP and calculate c0 = g * poly + e - (c1*sk). However there are two drawbacks to this:
                 // 1. This will require pre-computation for switching Q to P and then extending Q to QP
                 // 2. Notice that calculating P part will be useless since it will be multiplied by `g` afterwards. `g` is of form `P * (Q/Qj)^-1_Qj * (Q/Qj)` and will vanish
-                // over pi.
+                // over `pi`.
 
                 // Q parts
                 // g = P * Qj_hat * Qj_hat_inv_modQj
@@ -584,7 +581,11 @@ mod tests {
 
     #[test]
     fn key_switching_works() {
-        let bfv_params = Arc::new(BfvParameters::new(&[60, 60, 60, 60, 60, 60], 65537, 1 << 8));
+        let bfv_params = Arc::new(BfvParameters::new(
+            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
+            65537,
+            1 << 8,
+        ));
         let ct_ctx = bfv_params.ciphertext_poly_contexts[0].clone();
         let ksk_ctx = ct_ctx.clone();
 
@@ -596,7 +597,10 @@ mod tests {
         let ksk = BVKeySwitchingKey::new(&poly, &sk, &ct_ctx, &mut rng);
 
         let mut other_poly = Poly::random(&ct_ctx, &Representation::Coefficient, &mut rng);
+
+        let now = std::time::Instant::now();
         let cs = ksk.switch(&other_poly);
+        println!("Time elapsed: {:?}", now.elapsed());
 
         let mut sk_poly =
             Poly::try_convert_from_i64(&sk.coefficients, &ksk_ctx, &Representation::Coefficient);
@@ -612,13 +616,18 @@ mod tests {
 
         izip!(Vec::<BigUint>::from(&res).iter(),).for_each(|v| {
             let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.modulus() - v).bits());
+            dbg!(&diff_bits);
             assert!(diff_bits <= 70);
         });
     }
 
     #[test]
     fn hybrid_key_switching() {
-        let bfv_params = Arc::new(BfvParameters::new(&[60, 60, 60, 60, 60, 60], 65537, 1 << 3));
+        let bfv_params = Arc::new(BfvParameters::new(
+            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
+            65537,
+            1 << 8,
+        ));
         let ct_ctx = bfv_params.ciphertext_poly_contexts[0].clone();
         let ksk_ctx = ct_ctx.clone();
 
@@ -630,7 +639,9 @@ mod tests {
         let ksk = HybridKeySwitchingKey::new(&poly, &sk, &ct_ctx, &mut rng);
 
         let mut other_poly = Poly::random(&ct_ctx, &Representation::Coefficient, &mut rng);
+        let now = std::time::Instant::now();
         let cs = ksk.switch(&other_poly);
+        println!("Time elapsed: {:?}", now.elapsed());
 
         let mut sk_poly =
             Poly::try_convert_from_i64(&sk.coefficients, &ksk_ctx, &Representation::Coefficient);
@@ -643,16 +654,6 @@ mod tests {
 
         res -= &other_poly;
         res.change_representation(Representation::Coefficient);
-        dbg!();
-        dbg!();
-        dbg!();
-        dbg!();
-        dbg!();
-        dbg!();
-        dbg!();
-        dbg!();
-        dbg!();
-        dbg!();
         izip!(Vec::<BigUint>::from(&res).iter(),).for_each(|v| {
             let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.modulus() - v).bits());
             dbg!(diff_bits);
