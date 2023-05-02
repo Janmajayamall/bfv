@@ -392,42 +392,6 @@ impl HybridKeySwitchingKey {
             };
             let mut parts_count = qj_coefficients.shape()[0];
 
-            // TODO: (REMOVE)pre comp stuff
-            // FIXME: Problem is in pre-computation
-            let qj_moduli = if (i + 1) == self.alpha {
-                poly.context.moduli[(i * self.dnum)..].to_vec()
-            } else {
-                poly.context.moduli[(i * self.dnum)..((i + 1) * self.dnum)].to_vec()
-            };
-            let mod_ops = qj_moduli
-                .iter()
-                .map(|v| Modulus::new(*v).unwrap())
-                .collect_vec();
-            let mut q_hat_inv_modq = vec![];
-            let mut q_hat_modp = vec![];
-            let qj_ctx = Arc::new(PolyContext::new(qj_moduli.as_ref(), qp_poly.context.degree));
-            let mut qj = qj_ctx.modulus();
-            let mut qj_dig = qj_ctx.modulus_dig();
-            izip!(qj_ctx.moduli.iter()).for_each(|(qi)| {
-                let qi_hat_inv_modqi = (&qj_dig / *qi)
-                    .mod_inverse(BigUintDig::from_u64(*qi).unwrap())
-                    .unwrap()
-                    .to_biguint()
-                    .unwrap()
-                    .to_u64()
-                    .unwrap();
-
-                q_hat_inv_modq.push(qi_hat_inv_modqi);
-
-                izip!(self.qp_ctx.moduli.iter())
-                    .for_each(|pj| q_hat_modp.push(((&qj / qi) % pj).to_u64().unwrap()));
-            });
-            let q_hat_modp = Array2::<u64>::from_shape_vec(
-                (qj_ctx.moduli.len(), self.qp_ctx.moduli.len()),
-                q_hat_modp,
-            )
-            .unwrap();
-
             let mut p_whole_coefficients = Poly::approx_switch_crt_basis(
                 &qj_coefficients,
                 &self.q_mod_ops_parts[i],
@@ -436,75 +400,6 @@ impl HybridKeySwitchingKey {
                 &self.q_hat_modp_parts[i],
                 &self.p_moduli_parts[i],
             );
-
-            // let mut qp_poly = Poly::new(
-            //     p_whole_coefficients,
-            //     &self.qp_ctx,
-            //     Representation::Coefficient,
-            // );
-
-            // {
-            //     let qj_moduli = if (i + 1) == self.alpha {
-            //         poly.context.moduli[(i * self.dnum)..].to_vec()
-            //     } else {
-            //         poly.context.moduli[(i * self.dnum)..((i + 1) * self.dnum)].to_vec()
-            //     };
-            //     let mut qj = BigUint::one();
-            //     qj_moduli.iter().for_each(|v| {
-            //         qj *= *v;
-            //     });
-            //     let qj_ctx = Arc::new(PolyContext::new(qj_moduli.as_ref(), qp_poly.context.degree));
-            //     let qj_poly = Poly::new(
-            //         qj_coefficients.clone(),
-            //         &qj_ctx,
-            //         Representation::Coefficient,
-            //     );
-
-            //     let p_whole_ctx = Arc::new(PolyContext::new(
-            //         self.p_moduli_parts[i].as_ref(),
-            //         qp_poly.context.degree,
-            //     ));
-            //     let p_whole_res = Poly::new(
-            //         p_whole_coefficients.clone(),
-            //         &p_whole_ctx,
-            //         Representation::Coefficient,
-            //     );
-            //     let p_whole_expected = Vec::<BigUint>::from(&qj_poly)
-            //         .iter()
-            //         .map(|v| v.clone() % &p_whole_ctx.modulus())
-            //         .collect_vec();
-            //     izip!(p_whole_expected.iter(), Vec::<BigUint>::from(&p_whole_res)).for_each(
-            //         |(e, r)| {
-            //             let diff = r.to_bigint().unwrap() - e.to_bigint().unwrap();
-            //             dbg!(diff.bits());
-            //         },
-            //     );
-            // }
-
-            // {
-            //     let qj_moduli = if (i + 1) == self.alpha {
-            //         poly.context.moduli[(i * self.dnum)..].to_vec()
-            //     } else {
-            //         poly.context.moduli[(i * self.dnum)..((i + 1) * self.dnum)].to_vec()
-            //     };
-
-            //     let p_whole = self.p_moduli_parts[i].clone();
-            //     let mut qp_moduli = vec![];
-            //     // ..p_start
-            //     izip!(p_whole.iter().take(i * self.dnum)).for_each(|(pi)| {
-            //         qp_moduli.push(*pi);
-            //     });
-
-            //     // p_start..p_start+qj
-            //     izip!(qj_moduli.iter()).for_each(|(qj)| qp_moduli.push(*qj));
-
-            //     // p_start+qj..
-            //     izip!(p_whole.iter().skip(i * self.dnum)).for_each(|(pi)| {
-            //         qp_moduli.push(*pi);
-            //     });
-
-            //     assert!(qp_moduli == self.qp_ctx.moduli.to_vec());
-            // }
 
             // ..p_start
             izip!(
@@ -541,45 +436,6 @@ impl HybridKeySwitchingKey {
                     .unwrap()
                     .copy_from_slice(pi.as_slice().unwrap());
             });
-
-            // TODO: remove stuff inside brackets
-            // convert qj in qp
-            let mut qp_poly1 = {
-                let big_poly = Vec::<BigUint>::from(poly);
-                let qj_moduli = if (i + 1) == self.alpha {
-                    poly.context.moduli[(i * self.dnum)..].to_vec()
-                } else {
-                    poly.context.moduli[(i * self.dnum)..((i + 1) * self.dnum)].to_vec()
-                };
-                let mut qj = BigUint::one();
-                qj_moduli.iter().for_each(|v| {
-                    qj *= *v;
-                });
-                let qj_poly = {
-                    let qj_ctx =
-                        Arc::new(PolyContext::new(qj_moduli.as_ref(), qp_poly.context.degree));
-                    let qj_poly = Poly::new(
-                        qj_coefficients.clone(),
-                        &qj_ctx,
-                        Representation::Coefficient,
-                    );
-                    Vec::<BigUint>::from(&qj_poly)
-                };
-                let qp = self.qp_ctx.modulus();
-                let expected_poly = qj_poly.iter().map(|v| v % &qp).collect_vec();
-                izip!(Vec::<BigUint>::from(&qp_poly).iter(), expected_poly.iter()).for_each(
-                    |(r, e)| {
-                        let diff = r.to_bigint().unwrap() - e.to_bigint().unwrap();
-                        dbg!(diff.bits());
-                    },
-                );
-
-                Poly::try_convert_from_biguint(
-                    &expected_poly,
-                    &self.qp_ctx,
-                    &Representation::Coefficient,
-                )
-            };
 
             qp_poly.change_representation(Representation::Evaluation);
             poly_parts_qp.push(qp_poly);
