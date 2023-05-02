@@ -545,11 +545,9 @@ impl Poly {
                 )
                 .for_each(|(xi, qi_hat_inv_modqi, qi_hat_modp, modqi)| {
                     let tmp = modqi.mul(*xi, *qi_hat_inv_modqi);
-                    izip!(sum.iter_mut(), qi_hat_modp.iter(), p_moduli.iter())
-                        .skip(1)
-                        .for_each(|(vj, qi_hat_modpj, modpj)| {
-                            *vj += (tmp as u128 * *qi_hat_modpj as u128)
-                        });
+                    izip!(sum.iter_mut(), qi_hat_modp.iter(), p_moduli.iter()).for_each(
+                        |(vj, qi_hat_modpj, modpj)| *vj += (tmp as u128 * *qi_hat_modpj as u128),
+                    );
                 });
 
                 //TODO: replace % with Barret reduction u128 (like openfhe - https://github.com/openfheorg/openfhe-development/blob/303b8c1d67384fa6273180ba7b62d4bc27ea77e3/src/core/lib/lattice/hal/default/dcrtpoly.cpp#L1438)
@@ -1094,15 +1092,13 @@ mod tests {
     #[test]
     pub fn test_approx_switch_crt_basis() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::new(&[60, 60, 60, 60, 60], 1153, 8);
+        let polynomial_degree = 8;
+        let p_moduli = generate_primes(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
+        let q_moduli = p_moduli[..3].to_vec();
 
-        let q_context = bfv_params.ciphertext_poly_contexts[4].clone();
-        let p_context = bfv_params.extension_poly_contexts[0].clone();
+        let q_context = Arc::new(PolyContext::new(&q_moduli, polynomial_degree));
+        let p_context = Arc::new(PolyContext::new(&p_moduli, polynomial_degree));
 
-        dbg!(&q_context.moduli);
-        dbg!(&p_context.moduli);
-
-        let p_moduli = p_context.moduli.clone();
         let mut p_poly = Poly::zero(&p_context, &Representation::Coefficient);
 
         // Pre-computation
@@ -1143,39 +1139,14 @@ mod tests {
 
         let q = q_context.modulus();
         let p = p_context.modulus();
-        dbg!(&q);
-        dbg!(&p);
-        let p_res: Vec<BigUint> = Vec::<BigUint>::from(&p_poly)
-            .iter()
-            .map(|xi| {
-                if xi >= &(&p >> 1) {
-                    &p - ((((&p - xi) + (&q >> 1)) / &q) % &p)
-                } else {
-                    ((xi + (&q >> 1)) / &q) % &p
-                }
-            })
-            .collect_vec();
 
         let p_expected: Vec<BigUint> = Vec::<BigUint>::from(&q_poly)
             .iter()
-            .map(|xi| {
-                if xi >= &(&q >> 1) {
-                    &p - ((&q - xi) % &p)
-                } else {
-                    xi % &p
-                }
-            })
-            .map(|xi| {
-                if &xi >= &(&p >> 1) {
-                    &p - ((((&p - xi) + (&q >> 1)) / &q) % &p)
-                } else {
-                    ((xi + (&q >> 1)) / &q) % &p
-                }
-            })
+            .map(|xi| xi % &p)
             .collect_vec();
-        izip!(p_res.iter(), p_expected.iter()).for_each(|(r, e)| {
+        izip!(Vec::<BigUint>::from(&p_poly).iter(), p_expected.iter()).for_each(|(r, e)| {
             let mut diff = r.to_bigint().unwrap() - e.to_bigint().unwrap();
-            dbg!(r, e, &diff, diff.bits());
+            dbg!(r, e, diff.bits());
         })
     }
 
