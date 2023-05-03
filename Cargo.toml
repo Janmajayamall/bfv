@@ -10,9 +10,10 @@ num-bigint-dig = {version = "0.8.2", features = ["prime"]}
 fhe-math = { path = "../fhe.rs/crates/fhe-math"   }
 fhe-util = { path = "../fhe.rs/crates/fhe-util"   }
 rand = "0.8.5"
-ndarray = "0.15.6"
+ndarray = {version = "0.15.6", features = ["rayon"]}
 itertools = "0.10.5"
 num-bigint = "0.4.3"
 num-traits = "0.2.15"
 crypto-bigint = "0.4.9"
 rand_chacha = "0.3.1"
+rayon = "1.7.0"

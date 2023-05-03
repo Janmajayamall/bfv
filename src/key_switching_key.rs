@@ -6,7 +6,7 @@ use crate::{
 use crypto_bigint::rand_core::CryptoRngCore;
 use fhe_math::zq::Modulus;
 use itertools::{izip, Itertools};
-use ndarray::{s, Array2, Array3};
+use ndarray::{azip, par_azip, s, Array2, Array3, Axis, IntoNdProducer};
 use num_bigint::{BigUint, ToBigInt};
 use num_bigint_dig::BigUint as BigUintDig;
 use num_bigint_dig::ModInverse;
@@ -398,37 +398,53 @@ impl HybridKeySwitchingKey {
                 &self.p_moduli_parts[i],
             );
 
+            // TODO: can you parallelize following 3 operations ?
             // ..p_start
-            izip!(
-                qp_poly.coefficients.outer_iter_mut().take(i * self.alpha),
-                p_whole_coefficients.outer_iter().take(i * self.alpha)
+            azip!(
+                qp_poly
+                    .coefficients
+                    .slice_mut(s![..(i * self.alpha), ..])
+                    .outer_iter_mut()
+                    .into_producer(),
+                p_whole_coefficients
+                    .slice(s![..(i * self.alpha), ..])
+                    .outer_iter()
+                    .into_producer()
             )
-            .for_each(|(mut qpi, pi)| {
+            .for_each(|mut qpi, pi| {
                 qpi.as_slice_mut()
                     .unwrap()
                     .copy_from_slice(pi.as_slice().unwrap());
             });
 
             // p_start..p_start+qj
-            izip!(
-                qp_poly.coefficients.outer_iter_mut().skip(i * self.alpha),
-                qj_coefficients.outer_iter()
+            azip!(
+                qp_poly
+                    .coefficients
+                    .slice_mut(s![(i * self.alpha)..(i * self.alpha + parts_count), ..])
+                    .outer_iter_mut()
+                    .into_producer(),
+                qj_coefficients.outer_iter().into_producer()
             )
-            .for_each(|(mut qpi, qj)| {
+            .for_each(|mut qpi, qj| {
                 qpi.as_slice_mut()
                     .unwrap()
                     .copy_from_slice(qj.as_slice().unwrap());
             });
 
             // p_start+qj..
-            izip!(
+            azip!(
                 qp_poly
                     .coefficients
+                    .slice_mut(s![(i * self.alpha + parts_count).., ..])
                     .outer_iter_mut()
-                    .skip(i * self.alpha + parts_count),
-                p_whole_coefficients.outer_iter().skip(i * self.alpha)
+                    .into_producer(),
+                p_whole_coefficients
+                    .slice(s![i * self.alpha.., ..])
+                    .outer_iter()
+                    .into_producer()
             )
-            .for_each(|(mut qpi, pi)| {
+            .for_each(|mut qpi, pi| {
                 qpi.as_slice_mut()
                     .unwrap()
                     .copy_from_slice(pi.as_slice().unwrap());
@@ -578,6 +594,7 @@ mod tests {
     use crate::BfvParameters;
     use num_bigint::BigUint;
     use rand::thread_rng;
+    use rayon::prelude::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 
     #[test]
     fn key_switching_works() {
@@ -616,7 +633,7 @@ mod tests {
 
         izip!(Vec::<BigUint>::from(&res).iter(),).for_each(|v| {
             let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.modulus() - v).bits());
-            dbg!(&diff_bits);
+            // dbg!(&diff_bits);
             assert!(diff_bits <= 70);
         });
     }
@@ -658,5 +675,59 @@ mod tests {
             let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.modulus() - v).bits());
             dbg!(diff_bits);
         });
+    }
+
+    #[test]
+    fn comp() {
+        let bfv_params = Arc::new(BfvParameters::new(
+            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
+            65537,
+            1 << 15,
+        ));
+        let ctx = bfv_params.ciphertext_poly_contexts[0].clone();
+
+        let mut rng = thread_rng();
+        let mut p = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
+        let q = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
+        let modop = Modulus::new(32).unwrap();
+
+        // rayon::ThreadPoolBuilder::new()
+        //     .num_threads(10)
+        //     .build_global()
+        //     .unwrap();
+
+        let now = std::time::Instant::now();
+        azip!(
+            p.coefficients.axis_iter_mut(Axis(1)),
+            q.coefficients.axis_iter(Axis(1))
+        )
+        .par_for_each(|mut a, b| {
+            a[0] += modop.mul(a[0], b[0]);
+            a[1] += modop.mul(a[1], b[1]);
+            a[2] += modop.mul(a[2], b[2]);
+            a[3] += modop.mul(a[5], b[5]);
+            a[4] += modop.mul(a[3], b[3]);
+            a[5] += modop.mul(a[4], b[4]);
+        });
+        println!("azip! took: {:?}", now.elapsed());
+
+        let mut p = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
+        let q = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
+        let modop = Modulus::new(32).unwrap();
+
+        let now = std::time::Instant::now();
+        izip!(
+            p.coefficients.axis_iter_mut(Axis(1)),
+            q.coefficients.axis_iter(Axis(1))
+        )
+        .for_each(|(mut a, b)| {
+            a[0] += modop.mul(a[0], b[0]);
+            a[1] += modop.mul(a[1], b[1]);
+            a[2] += modop.mul(a[2], b[2]);
+            a[3] += modop.mul(a[5], b[5]);
+            a[4] += modop.mul(a[3], b[3]);
+            a[5] += modop.mul(a[4], b[4]);
+        });
+        println!("izip! took: {:?}", now.elapsed());
     }
 }
