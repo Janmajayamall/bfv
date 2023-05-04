@@ -2,12 +2,10 @@ use num_bigint::BigUint;
 use num_traits::{One, ToPrimitive};
 use std::panic::RefUnwindSafe;
 
-/// `mu` is the precomputed factor needed for barret reduction
+/// Returns `mu` for 128 bit by 64 bit barrett reduction
 ///
-/// mu = floor(2^2k / modulus ), where k=64
-///
-/// Returns mu_hi and mu_lo
-fn compute_mu(modulus: u64) -> (u64, u64) {
+/// mu = floor(2^128 / modulus)
+fn compute_mu_double_reduction(modulus: u64) -> (u64, u64) {
     let mu = ((BigUint::one() << 128usize) / modulus).to_u128().unwrap();
     ((mu >> 64) as u64, mu as u64)
 }
@@ -90,7 +88,7 @@ mod tests {
             let modulus = generate_prime(60, 16, 1 << 60).unwrap();
             let value: u128 = rng.gen();
             dbg!(value);
-            let (mu_hi, mu_lo) = compute_mu(modulus);
+            let (mu_hi, mu_lo) = compute_mu_double_reduction(modulus);
             let res = barret_reduction_u128(value, modulus, mu_hi, mu_lo);
             assert_eq!(res, (value % (modulus as u128)) as u64);
         }
@@ -100,7 +98,7 @@ mod tests {
     fn barret_reduction_u128_perf() {
         let mut rng = thread_rng();
         let modulus = 1152921504606846577u64;
-        let (mu_hi, mu_lo) = compute_mu(modulus);
+        let (mu_hi, mu_lo) = compute_mu_double_reduction(modulus);
         let values = rng
             .sample_iter(Uniform::new(0, u128::MAX))
             .take(1 << 26)
