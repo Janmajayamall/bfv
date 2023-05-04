@@ -29,7 +29,13 @@ pub enum Representation {
 pub struct PolyContext {
     pub moduli: Box<[u64]>,
     pub moduli_ops: Box<[Modulus]>,
+
+    #[cfg(not(feature = "hexl"))]
     pub ntt_ops: Box<[NttOperator]>,
+
+    #[cfg(feature = "hexl")]
+    pub ntt_ops: Box<[NttOperator]>,
+
     q_hat: Box<[BigUint]>,
     q_hat_inv: Box<[BigUint]>,
     pub g: Box<[BigUint]>,
@@ -45,12 +51,14 @@ impl PolyContext {
             .iter()
             .map(|modulus| Modulus::new(*modulus).unwrap())
             .collect_vec();
-        //TODO: change this to use moduli_ops instead of moduli
-        let ntt_ops = moduli
+
+        #[cfg(not(feature = "hexl"))]
+        let ntt_ops = moduli_ops
             .iter()
-            .enumerate()
-            .map(|(index, modulus)| NttOperator::new(&moduli_ops[index], degree).unwrap())
+            .map(|m| NttOperator::new(m, degree).unwrap())
             .collect_vec();
+
+        // TODO: crate ntt operatoes for HEXL
 
         let mut q = BigUint::one();
         let mut q_dig = BigUintDig::one();
@@ -173,6 +181,7 @@ impl Poly {
                     self.context.ntt_ops.iter()
                 )
                 .for_each(|(mut coefficients, ntt)| {
+                    // TODO: switch between native and hexl
                     ntt.backward(coefficients.as_slice_mut().unwrap())
                 });
                 self.representation = Representation::Coefficient;
@@ -185,6 +194,7 @@ impl Poly {
                     self.context.ntt_ops.iter()
                 )
                 .for_each(|(mut coefficients, ntt)| {
+                    // TODO: switch between native and hexl
                     ntt.forward(coefficients.as_slice_mut().unwrap())
                 });
                 self.representation = Representation::Evaluation;

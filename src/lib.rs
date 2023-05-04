@@ -12,6 +12,7 @@ use std::sync::Arc;
 mod key_switching_key;
 mod nb_theory;
 mod poly;
+mod utils;
 
 /// Stores all the pre-computation
 /// values.
