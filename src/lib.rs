@@ -10,6 +10,7 @@ use rand::{distributions::Uniform, prelude::Distribution, CryptoRng, RngCore};
 use std::sync::Arc;
 
 mod key_switching_key;
+mod modulus;
 mod nb_theory;
 mod poly;
 mod utils;
