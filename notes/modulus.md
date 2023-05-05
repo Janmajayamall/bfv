@@ -22,7 +22,7 @@ Algorithm 2 of https://homes.esat.kuleuven.be/~fvercaut/papers/bar_mont.pdf spec
 
 1. We want to reduce a value that is `2n` bits by modulus that is `n` bits. The implementation follows Algorithm 14.42 of https://cacr.uwaterloo.ca/hac/about/chap14.pdf and https://github.com/openfheorg/openfhe-development/blob/055c89778d3d0dad00479150a053124137f4c3ca/src/core/include/utils/utilities-int.h#L59.
 
-### Shoup Multiplication
+# Shoup Multiplication
 
 First implemented in NTL by Victor Shoup and more details can be found in lines 5-7 of algorithm 2 in [Faster arithmetic for number theory transforms](https://arxiv.org/pdf/1205.2926.pdf).
 

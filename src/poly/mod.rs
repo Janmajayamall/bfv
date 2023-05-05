@@ -1,8 +1,6 @@
+use crate::modulus::Modulus;
 use crypto_bigint::U192;
-use fhe_math::{
-    rq::Context,
-    zq::{ntt::NttOperator, Modulus},
-};
+use fhe_math::{rq::Context, zq::ntt::NttOperator, zq::Modulus as ModulusOld};
 use fhe_util::sample_vec_cbd;
 use itertools::{izip, DedupBy, Itertools};
 use ndarray::{azip, s, Array2, Axis, IntoNdProducer};
@@ -49,13 +47,16 @@ impl PolyContext {
     pub fn new(moduli: &[u64], degree: usize) -> PolyContext {
         let moduli_ops = moduli
             .iter()
-            .map(|modulus| Modulus::new(*modulus).unwrap())
+            .map(|modulus| Modulus::new(*modulus))
             .collect_vec();
 
         #[cfg(not(feature = "hexl"))]
         let ntt_ops = moduli_ops
             .iter()
-            .map(|m| NttOperator::new(m, degree).unwrap())
+            .map(|m| {
+                let m = ModulusOld::new(m.modulus()).unwrap();
+                NttOperator::new(&m, degree).unwrap()
+            })
             .collect_vec();
 
         // TODO: crate ntt operatoes for HEXL
@@ -169,7 +170,7 @@ impl Poly {
     ) -> Poly {
         // TODO: replace this
         let v = sample_vec_cbd(poly_context.degree, variance, rng).unwrap();
-        Poly::try_convert_from_i64(&v, poly_context, representation)
+        Poly::try_convert_from_i64_small(&v, poly_context, representation)
     }
 
     /// Changes representation of the polynomial to `to` representation
@@ -215,9 +216,9 @@ impl Poly {
         t_qhat_inv_modq_divq_frac: &[f64],
         t_bqhat_inv_modq_divq_frac: &[f64],
     ) -> Vec<u64> {
-        assert!(self.representation == Representation::Coefficient);
+        debug_assert!(self.representation == Representation::Coefficient);
 
-        let t_f64 = t.p.to_f64().unwrap();
+        let t_f64 = t.modulus().to_f64().unwrap();
         let t_inv = 1.0 / t_f64;
 
         let t_values = self
@@ -239,8 +240,8 @@ impl Poly {
                     let xi_hi = xi >> b;
                     let xi_lo = xi - (xi_hi << b);
 
-                    rational_sum = t.add(rational_sum, t.mul(xi_lo, *rational));
-                    rational_sum = t.add(rational_sum, t.mul(xi_hi, *brational));
+                    rational_sum = t.add_mod_fast(rational_sum, t.mul_mod_fast(xi_lo, *rational));
+                    rational_sum = t.add_mod_fast(rational_sum, t.mul_mod_fast(xi_hi, *brational));
 
                     fractional_sum += xi_lo.to_f64().unwrap() * fractional;
                     fractional_sum += xi_hi.to_f64().unwrap() * bfractional;
@@ -314,19 +315,19 @@ impl Poly {
 
                     let mut s = frac;
                     for j in 0..input.len() {
-                        s += modo.mul(
+                        s += modo.mul_mod_fast(
                             *input.get(j).unwrap(),
                             *to_s_hat_inv_mods_divs_modo.get((i, j)).unwrap(),
                         ) as u128;
                     }
 
-                    s += modo.mul(
+                    s += modo.mul_mod_fast(
                         *pq_rests.get(output_offset + i).unwrap(),
                         *to_s_hat_inv_mods_divs_modo.get((i, input_size)).unwrap(),
                     ) as u128;
 
                     let oxi = o_rests.get_mut(i).unwrap();
-                    *oxi = modo.reduce_u128(s);
+                    *oxi = modo.barret_reduction_u128(s);
                 }
             }
             // println!("inner time1: {:?}", now.elapsed());
@@ -360,15 +361,16 @@ impl Poly {
                 self.context.moduli_ops.iter()
             )
             .for_each(|(xi, qi_inv_modp, neg_pqi_hat_inv, modqi)| {
-                let xi_v = modqi.mul(*xi, *neg_pqi_hat_inv);
+                // TODO: convert this to mul shoup
+                let xi_v = modqi.mul_mod_fast(*xi, *neg_pqi_hat_inv);
                 izip!(
                     p_rests.iter_mut(),
                     qi_inv_modp.iter(),
                     p_context.moduli_ops.iter()
                 )
                 .for_each(|(pxi, qi_inv, modpi)| {
-                    let tmp = modpi.mul(xi_v, *qi_inv);
-                    *pxi = modpi.add(*pxi, tmp);
+                    let tmp = modpi.mul_mod_fast(xi_v, *qi_inv);
+                    *pxi = modpi.add_mod_fast(*pxi, tmp);
                 })
             });
         });
@@ -401,8 +403,8 @@ impl Poly {
                 self.context.moduli_ops.iter()
             )
             .for_each(|(xi, qi_hat_inv, q_inv, modq)| {
-                // TODO: this can be hexled
-                let tmp = modq.mul(*xi, *qi_hat_inv);
+                // TODO: change this to mul_shoup
+                let tmp = modq.mul_mod_fast(*xi, *qi_hat_inv);
                 xi_q_hat_inv_modq.push(tmp);
 
                 nu += tmp as f64 * q_inv;
@@ -416,15 +418,16 @@ impl Poly {
                 p_context.moduli_ops.iter(),
                 alpha.iter(),
             )
-            .for_each(|(pxi, q_hat_modpi, modpi, alpha_modpi)| {
-                izip!(xi_q_hat_inv_modq.iter(), q_hat_modpi.iter()).for_each(
-                    |(xi_q_hat_inv, qi_hat)| {
+            .for_each(|(pxj, q_hat_modpj, modpj, alpha_modpj)| {
+                izip!(xi_q_hat_inv_modq.iter(), q_hat_modpj.iter()).for_each(
+                    |(xi_q_hat_inv, qi_hat_modpj)| {
                         // TODO: can FMA using HEXL
-                        *pxi = modpi.add(*pxi, modpi.mul(*xi_q_hat_inv, *qi_hat));
+                        *pxj = modpj
+                            .add_mod_fast(*pxj, modpj.mul_mod_fast(*xi_q_hat_inv, *qi_hat_modpj));
                     },
                 );
 
-                *pxi = modpi.sub(*pxi, *alpha_modpi);
+                *pxj = modpj.sub_mod_fast(*pxj, *alpha_modpj);
             });
         });
 
@@ -555,6 +558,8 @@ impl Poly {
     ) -> Array2<u64> {
         let mut p = Array2::<u64>::zeros((p_moduli.len(), degree));
 
+        // TODO: the computation within each loop isn't much. Does it make sense to parallelize this by Axis(1) or shall
+        // we switch to parallelizing by Axis(0)
         azip!(p.axis_iter_mut(Axis(1)), q_coefficients.axis_iter(Axis(1))).par_for_each(
             |mut p_rests, q_rests| {
                 let mut sum = vec![0u128; p_moduli.len()];
@@ -565,7 +570,8 @@ impl Poly {
                     q_moduli_ops.iter()
                 )
                 .for_each(|(xi, qi_hat_inv_modqi, qi_hat_modp, modqi)| {
-                    let tmp = modqi.mul(*xi, *qi_hat_inv_modqi);
+                    // TODO: change this to mul shoup
+                    let tmp = modqi.mul_mod_fast(*xi, *qi_hat_inv_modqi);
                     izip!(sum.iter_mut(), qi_hat_modp.iter(), p_moduli.iter()).for_each(
                         |(vj, qi_hat_modpj, modpj)| *vj += (tmp as u128 * *qi_hat_modpj as u128),
                     );
@@ -616,6 +622,8 @@ impl Poly {
         .par_for_each(|mut p_to_q_rests, p_rests| {
             let mut sum = vec![0u128; q_size];
 
+            // TODO: the computation within each loop isn't much. Does it make sense to parallelize this by Axis(1) or shall
+            // we switch to parallelizing by Axis(0)
             izip!(
                 p_rests.iter(),
                 p_hat_inv_modp.iter(),
@@ -623,7 +631,8 @@ impl Poly {
                 p_context.moduli_ops.iter()
             )
             .for_each(|(xi, pi_hat_inv_modpi, pi_hat_modq, modpi)| {
-                let tmp = modpi.mul(*xi, *pi_hat_inv_modpi) as u128;
+                // TODO: change this to mul shoup
+                let tmp = modpi.mul_mod_fast(*xi, *pi_hat_inv_modpi) as u128;
                 izip!(
                     sum.iter_mut(),
                     pi_hat_modq.iter(),
@@ -663,8 +672,8 @@ impl Poly {
             p_inv_modq.iter(),
         )
         .for_each(|((mut v, mut switched_v, modqi, p_inv_modqi))| {
-            modqi.sub_vec(v.as_slice_mut().unwrap(), switched_v.as_slice().unwrap());
-            modqi.scalar_mul_vec(v.as_slice_mut().unwrap(), *p_inv_modqi);
+            modqi.sub_mod_fast_vec(v.as_slice_mut().unwrap(), switched_v.as_slice().unwrap());
+            modqi.scalar_mul_mod_fast_vec(v.as_slice_mut().unwrap(), *p_inv_modqi);
         });
         q_coefficients
     }
@@ -680,7 +689,9 @@ impl AddAssign<&Poly> for Poly {
             rhs.coefficients.outer_iter(),
             self.context.moduli_ops.iter()
         )
-        .for_each(|(mut p1, p2, q)| q.add_vec(p1.as_slice_mut().unwrap(), p2.as_slice().unwrap()));
+        .for_each(|(mut p1, p2, q)| {
+            q.add_mod_fast_vec(p1.as_slice_mut().unwrap(), p2.as_slice().unwrap())
+        });
     }
 }
 
@@ -702,7 +713,9 @@ impl SubAssign<&Poly> for Poly {
             rhs.coefficients.outer_iter(),
             self.context.moduli_ops.iter()
         )
-        .for_each(|(mut p1, p2, q)| q.sub_vec(p1.as_slice_mut().unwrap(), p2.as_slice().unwrap()));
+        .for_each(|(mut p1, p2, q)| {
+            q.sub_mod_fast_vec(p1.as_slice_mut().unwrap(), p2.as_slice().unwrap())
+        });
     }
 }
 
@@ -728,7 +741,7 @@ impl MulAssign<&Poly> for Poly {
             self.context.moduli_ops.iter()
         )
         .for_each(|(mut p, p2, qi)| {
-            qi.mul_vec(p.as_slice_mut().unwrap(), p2.as_slice().unwrap());
+            qi.mul_mod_fast_vec(p.as_slice_mut().unwrap(), p2.as_slice().unwrap());
         });
     }
 }
@@ -785,10 +798,10 @@ impl Poly {
         poly
     }
 
-    /// Constructs a polynomial with given i32 values and assumes the given representation.  
+    /// Constructs a polynomial with given i64 values with small bound and assumes the given representation.  
     ///
     /// Panics if length of values is not equal to polynomial degree
-    pub fn try_convert_from_i64(
+    pub fn try_convert_from_i64_small(
         values: &[i64],
         poly_context: &Arc<PolyContext>,
         representation: &Representation,
@@ -803,7 +816,7 @@ impl Poly {
             qi_values
                 .as_slice_mut()
                 .unwrap()
-                .copy_from_slice(qi.reduce_vec_i64(values).as_slice());
+                .copy_from_slice(&qi.reduce_vec_i64_small(values).as_slice());
         });
         p
     }

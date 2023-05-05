@@ -1,10 +1,10 @@
+use crate::modulus::Modulus;
 use crate::{
     nb_theory::generate_prime,
     poly::{Poly, PolyContext, Representation},
     SecretKey,
 };
 use crypto_bigint::rand_core::CryptoRngCore;
-use fhe_math::zq::Modulus;
 use itertools::{izip, Itertools};
 use ndarray::{azip, par_azip, s, Array2, Array3, Axis, IntoNdProducer};
 use num_bigint::{BigUint, ToBigInt};
@@ -111,8 +111,11 @@ impl BVKeySwitchingKey {
         debug_assert!(ciphertext_ctx.moduli.len() == c1s.len());
         debug_assert!(poly.representation == Representation::Evaluation);
 
-        let mut sk =
-            Poly::try_convert_from_i64(&sk.coefficients, ksk_ctx, &Representation::Coefficient);
+        let mut sk = Poly::try_convert_from_i64_small(
+            &sk.coefficients,
+            ksk_ctx,
+            &Representation::Coefficient,
+        );
         sk.change_representation(Representation::Evaluation);
 
         izip!(ciphertext_ctx.g.into_iter(), c1s.iter())
@@ -538,7 +541,7 @@ impl HybridKeySwitchingKey {
                     e.coefficients.outer_iter(),
                 )
                 .for_each(|(modq, nttq, vqi, mut c0qi, c1qi, eqi)| {
-                    let mut skqi = modq.reduce_vec_i64(&sk.coefficients);
+                    let mut skqi = modq.reduce_vec_i64_small(&sk.coefficients);
                     nttq.forward(&mut skqi);
 
                     // [g * poly]_qi
@@ -546,16 +549,16 @@ impl HybridKeySwitchingKey {
                         .unwrap()
                         .copy_from_slice(vqi.as_slice().unwrap());
                     let g_u64 = (g_part % modq.modulus()).to_u64().unwrap();
-                    modq.scalar_mul_vec(c0qi.as_slice_mut().unwrap(), g_u64);
+                    modq.scalar_mul_mod_fast_vec(c0qi.as_slice_mut().unwrap(), g_u64);
 
                     // [g * poly]_qi + [e]_qi
-                    modq.add_vec(c0qi.as_slice_mut().unwrap(), eqi.as_slice().unwrap());
+                    modq.add_mod_fast_vec(c0qi.as_slice_mut().unwrap(), eqi.as_slice().unwrap());
 
                     // [c1s * sk]_qi
-                    modq.mul_vec(&mut skqi, c1qi.as_slice().unwrap());
+                    modq.mul_mod_fast_vec(&mut skqi, c1qi.as_slice().unwrap());
 
                     // [g * poly]_qi + [e]_qi - [c1s * sk]_qi
-                    modq.sub_vec(c0qi.as_slice_mut().unwrap(), &skqi);
+                    modq.sub_mod_fast_vec(c0qi.as_slice_mut().unwrap(), &skqi);
                 });
 
                 // P parts
@@ -574,11 +577,11 @@ impl HybridKeySwitchingKey {
                         .unwrap()
                         .copy_from_slice(epi.as_slice().unwrap());
 
-                    let mut skpi = modpi.reduce_vec_i64(&sk.coefficients);
+                    let mut skpi = modpi.reduce_vec_i64_small(&sk.coefficients);
                     nttpi.forward(&mut skpi);
-                    modpi.mul_vec(&mut skpi, c1pi.as_slice().unwrap());
+                    modpi.mul_mod_fast_vec(&mut skpi, c1pi.as_slice().unwrap());
 
-                    modpi.sub_vec(c0pi.as_slice_mut().unwrap(), &skpi);
+                    modpi.sub_mod_fast_vec(c0pi.as_slice_mut().unwrap(), &skpi);
                 });
 
                 c0
@@ -619,8 +622,11 @@ mod tests {
         let cs = ksk.switch(&other_poly);
         println!("Time elapsed: {:?}", now.elapsed());
 
-        let mut sk_poly =
-            Poly::try_convert_from_i64(&sk.coefficients, &ksk_ctx, &Representation::Coefficient);
+        let mut sk_poly = Poly::try_convert_from_i64_small(
+            &sk.coefficients,
+            &ksk_ctx,
+            &Representation::Coefficient,
+        );
         sk_poly.change_representation(Representation::Evaluation);
         let mut res = &cs[0] + &(&cs[1] * &sk_poly);
 
@@ -660,8 +666,11 @@ mod tests {
         let cs = ksk.switch(&other_poly);
         println!("Time elapsed: {:?}", now.elapsed());
 
-        let mut sk_poly =
-            Poly::try_convert_from_i64(&sk.coefficients, &ksk_ctx, &Representation::Coefficient);
+        let mut sk_poly = Poly::try_convert_from_i64_small(
+            &sk.coefficients,
+            &ksk_ctx,
+            &Representation::Coefficient,
+        );
         sk_poly.change_representation(Representation::Evaluation);
         let mut res = &cs[0] + &(&cs[1] * &sk_poly);
 

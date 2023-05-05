@@ -1,4 +1,5 @@
-use fhe_math::zq::{ntt::NttOperator, Modulus};
+use crate::modulus::Modulus;
+use fhe_math::zq::{ntt::NttOperator, Modulus as ModulusOld};
 use itertools::{izip, Itertools};
 use nb_theory::generate_prime;
 use ndarray::{Array2, MathCell};
@@ -15,12 +16,6 @@ mod nb_theory;
 mod poly;
 mod utils;
 
-/// Stores all the pre-computation
-/// values.
-///
-/// 1. Poly Contexts of all levels
-/// 2. pre-computations at all level
-/// 3.
 #[derive(PartialEq)]
 struct BfvParameters {
     ciphertext_moduli: Vec<u64>,
@@ -289,7 +284,7 @@ impl BfvParameters {
                     p_context
                         .moduli_ops
                         .iter()
-                        .for_each(|pi| qi_inv_modp.push(pi.inv(*qi % pi.modulus()).unwrap()));
+                        .for_each(|pi| qi_inv_modp.push(pi.inv(*qi % pi.modulus())));
                 });
 
                 neg_pql_hat_inv_modql.push(neg_pq_hat_inv_modq);
@@ -530,9 +525,14 @@ impl BfvParameters {
             pos &= m - 1;
         }
 
-        let plaintext_modulus_op = Modulus::new(plaintext_modulus).unwrap();
-        // FIXME: throw error instead
-        let plaintext_ntt_op = NttOperator::new(&plaintext_modulus_op, polynomial_degree).unwrap();
+        let plaintext_modulus_op = Modulus::new(plaintext_modulus);
+
+        // TODO: change ModulusOld with Modulus
+        let plaintext_ntt_op = NttOperator::new(
+            &ModulusOld::new(plaintext_modulus).unwrap(),
+            polynomial_degree,
+        )
+        .unwrap();
 
         BfvParameters {
             ciphertext_moduli,
@@ -704,7 +704,7 @@ impl SecretKey {
     ///
     /// Panics if each value in coefficients does not belong to ternary distribution (ie {-1,0,1}).
     pub fn new(coefficients: Vec<i64>, params: &Arc<BfvParameters>) -> SecretKey {
-        assert!(coefficients.len() != params.polynomial_degree);
+        assert!(coefficients.len() == params.polynomial_degree);
         coefficients.iter().for_each(|c| {
             assert!(-1 <= *c && 1 >= *c);
         });
@@ -718,8 +718,11 @@ impl SecretKey {
     /// Returns secret key polynomial for polynomial context at given level in Evaluation form
     fn to_poly(&self, level: usize) -> Poly {
         let context = self.params.ciphertext_poly_contexts[level].clone();
-        let mut p =
-            Poly::try_convert_from_i64(&self.coefficients, &context, &Representation::Coefficient);
+        let mut p = Poly::try_convert_from_i64_small(
+            &self.coefficients,
+            &context,
+            &Representation::Coefficient,
+        );
         p.change_representation(Representation::Evaluation);
         p
     }
@@ -903,9 +906,9 @@ impl Plaintext {
     pub fn to_poly(&self) -> Poly {
         match &self.encoding {
             Some(encoding) => {
-                let modt = Modulus::new(self.params.plaintext_modulus).unwrap();
+                let modt = Modulus::new(self.params.plaintext_modulus);
                 let mut m = self.m.clone();
-                modt.scalar_mul_vec(&mut m, self.params.ql_modt[encoding.level]);
+                modt.scalar_mul_mod_fast_vec(&mut m, self.params.ql_modt[encoding.level]);
 
                 let mut m_poly = Poly::try_convert_from_u64(
                     &m,

@@ -1,4 +1,10 @@
-struct Modulus {
+use itertools::izip;
+use num_bigint_dig::{prime::probably_prime, BigUint};
+use num_traits::{One, ToPrimitive};
+use rand::{distributions::Uniform, CryptoRng, Rng, RngCore};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Modulus {
     mu_hi: u64,
     mu_lo: u64,
     mu: u64,
@@ -7,29 +13,64 @@ struct Modulus {
 }
 
 impl Modulus {
-    fn new(modulus: u64) -> Modulus {
+    pub fn new(modulus: u64) -> Modulus {
         // mu = 2^(2n+3) / modulus
         let n = 64 - (modulus.leading_zeros() as u64);
         let mu = (1u128 << (2 * n + 3)) / (modulus as u128);
+
+        // mu for 128 bits by 64 bits barrett reduction
+        // mu = floor(2^128 / m)
+        let mu_u128 = ((BigUint::one() << 128usize) / modulus).to_u128().unwrap();
+
         Modulus {
-            mu_hi: 2,
-            mu_lo: 2,
+            mu_hi: (mu_u128 >> 64) as u64,
+            mu_lo: mu_u128 as u64,
             mu: mu as u64,
             modulus,
             mod_bits: n,
         }
     }
 
+    pub const fn modulus(&self) -> u64 {
+        self.modulus
+    }
+
+    /// Computes modulus exponentiation using binary exponentiation
+    pub fn exp(&self, mut a: u64, mut e: u64) -> u64 {
+        let mut r = 1u64;
+        while e != 0 {
+            if e & 1 == 1 {
+                r = self.mul_mod_fast(r, a);
+            }
+            a = self.mul_mod_fast(a, a);
+            e >>= 1;
+        }
+        r
+    }
+
+    /// Computes multiplicative inverse of a
+    ///
+    /// modulus must be prime
+    pub fn inv(&self, a: u64) -> u64 {
+        assert!(probably_prime(&BigUint::from(self.modulus), 0));
+        assert!(a < self.modulus);
+        if a == 0 {
+            0
+        } else {
+            self.exp(a, self.modulus - 2)
+        }
+    }
+
     /// Computes shoup representation
     ///
     /// a should be smaller than modulus
-    fn compute_shoup(&self, a: u64) -> u64 {
+    pub const fn compute_shoup(&self, a: u64) -> u64 {
         debug_assert!(a < self.modulus);
-        (((a as u128) << 64) / self.modulus) as u64
+        (((a as u128) << 64) / self.modulus as u128) as u64
     }
 
     /// Barrett modulus reduction of 64 bits value.
-    fn reduce(&self, a: u64) -> u64 {
+    pub const fn reduce(&self, a: u64) -> u64 {
         let n = self.mod_bits;
         let alpha = n + 3;
         // beta = -2
@@ -50,7 +91,7 @@ impl Modulus {
     }
 
     /// Barrett modulus addition
-    fn add_mod(&self, mut a: u64, mut b: u64) -> u64 {
+    pub const fn add_mod(&self, mut a: u64, mut b: u64) -> u64 {
         if a >= self.modulus {
             a = self.reduce(a);
         }
@@ -69,7 +110,7 @@ impl Modulus {
     /// Modulus addition
     ///
     /// Assumes both a and b are smaller than modulus
-    fn add_mod_fast(&self, a: u64, b: u64) -> u64 {
+    pub const fn add_mod_fast(&self, a: u64, b: u64) -> u64 {
         debug_assert!(a < self.modulus);
         debug_assert!(b < self.modulus);
 
@@ -99,7 +140,7 @@ impl Modulus {
     /// Modulus subtraction
     ///
     /// Assumes both a and b < modulus
-    fn sub_mod_fast(&self, a: u64, b: u64) -> u64 {
+    pub fn sub_mod_fast(&self, a: u64, b: u64) -> u64 {
         debug_assert!(a < self.modulus);
         debug_assert!(b < self.modulus);
 
@@ -113,7 +154,10 @@ impl Modulus {
     /// Barrett modulur multiplication. Assumes that a and b are < modulus.
     ///
     /// Refer to implementation notes for more details
-    fn mul_mod_fast(&self, a: u64, b: u64) -> u64 {
+    pub fn mul_mod_fast(&self, a: u64, b: u64) -> u64 {
+        debug_assert!(a < self.modulus);
+        debug_assert!(b < self.modulus);
+
         let mut ab = a as u128 * b as u128;
         let n = self.mod_bits;
         let alpha = n + 3;
@@ -143,7 +187,7 @@ impl Modulus {
         debug_assert!(b < self.modulus);
 
         let q = (a as u128 * b_shoup as u128) >> 64;
-        let r = ((a as u128 * b as u128) - (q * self.modulus as u128)) as u64;
+        let mut r = ((a as u128 * b as u128) - (q * self.modulus as u128)) as u64;
 
         if r >= self.modulus {
             r -= self.modulus
@@ -151,14 +195,174 @@ impl Modulus {
 
         r
     }
+
+    /// BarretReduction of 128 bits value by 64 bits modulus
+    /// Source: Menezes, Alfred; Oorschot, Paul; Vanstone, Scott. Handbook of Applied Cryptography, Section 14.3.3.
+    ///
+    /// Implementation reference: https://github.com/openfheorg/openfhe-development/blob/055c89778d3d0dad00479150a053124137f4c3ca/src/core/include/utils/utilities-int.h#L59
+    pub fn barret_reduction_u128(&self, a: u128) -> u64 {
+        // We need to calculate a * mu / 2^128
+        // Notice that we don't need lower 128 bits of 256 bit product
+        let a_hi = (a >> 64) as u64;
+        let a_lo = a as u64;
+
+        let mu_lo_a_lo_hi = ((self.mu_lo as u128 * a_lo as u128) >> 64) as u64;
+
+        // carry part 1
+        let middle = self.mu_hi as u128 * a_lo as u128;
+        let middle_lo = middle as u64;
+        let mut middle_hi = (middle >> 64) as u64;
+        let (carry_acc, carry) = middle_lo.overflowing_add(mu_lo_a_lo_hi);
+        middle_hi += carry as u64;
+
+        // carry part 2
+        let middle = a_hi as u128 * self.mu_lo as u128;
+        let middle_lo = middle as u64;
+        let mut middle_hi2 = (middle >> 64) as u64;
+        let (_, carry2) = middle_lo.overflowing_add(carry_acc);
+        middle_hi2 += carry2 as u64;
+
+        // we only need lower 64 bits from higher 128 bits of (a*m / 2^128)
+        let tmp = a_hi
+            .wrapping_mul(self.mu_hi)
+            .wrapping_add(middle_hi)
+            .wrapping_add(middle_hi2);
+        let mut result = a_lo.wrapping_sub(tmp.wrapping_mul(self.modulus));
+
+        while result >= self.modulus {
+            result -= self.modulus;
+        }
+
+        result
+    }
+
+    /// Implementation to compare perf against
+    ///
+    /// Taken from https://github.com/tlepoint/fhe.rs/blob/725c2217a1f71cc2701bbbe9cc86ef8fb0b097cb/crates/fhe-math/src/zq/mod.rs#L619
+    ///
+    /// Note: If no difference is observed on intel as well, then it's better to use this one.
+    pub const fn barret_reduction_u128_m2(&self, a: u128, p: u64) -> u64 {
+        let a_lo = a as u64;
+        let a_hi = (a >> 64) as u64;
+        let p_lo_lo = ((a_lo as u128) * (self.mu_lo as u128)) >> 64;
+        let p_hi_lo = (a_hi as u128) * (self.mu_lo as u128);
+        let p_lo_hi = (a_lo as u128) * (self.mu_lo as u128);
+
+        let q = ((p_lo_hi + p_hi_lo + p_lo_lo) >> 64) + (a_hi as u128) * (self.mu_hi as u128);
+        let mut r = (a - q * (self.modulus as u128)) as u64;
+
+        while r >= self.modulus {
+            r -= self.modulus;
+        }
+        r
+    }
+
+    pub fn add_mod_fast_vec(&self, a: &mut [u64], b: &[u64]) {
+        izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.add_mod_fast(*va, *vb));
+    }
+
+    /// Modulus subtraction
+    ///
+    /// Assumes each element in vec a and b are smaller than modulus
+    pub fn sub_mod_fast_vec(&self, a: &mut [u64], b: &[u64]) {
+        izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.sub_mod_fast(*va, *vb));
+    }
+
+    pub fn mul_mod_fast_vec(&self, a: &mut [u64], b: &[u64]) {
+        izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb));
+    }
+
+    /// Barrett modulus multiplication of scalar with vector a
+    ///
+    /// Assumes scalar and all elements in a are smaller than modulus
+    pub fn scalar_mul_mod_fast_vec(&self, a: &mut [u64], b: u64) {
+        a.iter_mut().for_each(|v| {
+            *v = self.mul_mod_fast(*v, b);
+        });
+    }
+
+    pub fn reduce_vec(&self, a: &mut [u64]) {
+        a.iter_mut().for_each(|v| {
+            *v = self.reduce(*v);
+        });
+    }
+
+    /// Modulus reduction of i64 values with small bound
+    ///
+    /// Assumes magnitude of all values is smaller than modulus
+    pub fn reduce_vec_i64_small(&self, a: &[i64]) -> Vec<u64> {
+        a.iter()
+            .map(|v| {
+                if *v < 0 {
+                    ((self.modulus as i64) + *v) as u64
+                } else {
+                    *v as u64
+                }
+            })
+            .collect()
+    }
+
+    pub fn random_vec<R: CryptoRng + RngCore>(&self, size: usize, rng: &mut R) -> Vec<u64> {
+        rng.sample_iter(Uniform::new(0, self.modulus))
+            .take(size)
+            .collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use rand::{thread_rng, Rng};
-
     use super::*;
     use crate::nb_theory::generate_prime;
+    use rand::{thread_rng, Rng};
+
+    #[test]
+    fn reduce_works() {
+        let prime = generate_prime(60, 16, 1 << 60).unwrap();
+        let modulus = Modulus::new(prime);
+
+        let mut rng = thread_rng();
+        for _ in 0..1000 {
+            let a = rng.gen::<u64>();
+            let res = modulus.reduce(a);
+            assert_eq!(res, a % prime);
+        }
+    }
+
+    #[test]
+    fn add_mod_works() {
+        let prime = generate_prime(60, 16, 1 << 60).unwrap();
+        let modulus = Modulus::new(prime);
+
+        let mut rng = thread_rng();
+        for _ in 0..1000 {
+            let a = rng.gen::<u64>();
+            let b = rng.gen::<u64>();
+            let res1 = modulus.add_mod(a, b);
+            let res2 = modulus.add_mod_fast(a % prime, b % prime);
+            let expected = ((a % prime) + (b % prime)) % prime;
+            assert_eq!(res1, expected);
+            assert_eq!(res2, expected);
+        }
+    }
+
+    #[test]
+    fn sub_mod_works() {
+        let prime = generate_prime(60, 16, 1 << 60).unwrap();
+        let modulus = Modulus::new(prime);
+
+        let mut rng = thread_rng();
+        for _ in 0..1000 {
+            let mut a = rng.gen::<u64>();
+            let mut b = rng.gen::<u64>();
+            let res1 = modulus.sub_mod(a, b);
+            let res2 = modulus.sub_mod(a % prime, b % prime);
+            a %= prime;
+            b %= prime;
+            let expected = ((a + prime) - b) % prime;
+            assert_eq!(res1, expected);
+            assert_eq!(res2, expected);
+        }
+    }
 
     // TODO: write perf for mul_mod_fast
     #[test]
@@ -173,5 +377,68 @@ mod tests {
             let res = modulus.mul_mod_fast(a, b);
             assert_eq!(res, ((a as u128 * b as u128) % (prime as u128)) as u64);
         }
+    }
+
+    #[test]
+    fn mul_mod_shoup_works() {
+        let prime = generate_prime(60, 16, 1 << 60).unwrap();
+        let modulus = Modulus::new(prime);
+        let mut rng = thread_rng();
+        for _ in 0..1000 {
+            let a = rng.gen::<u64>() % prime;
+            let b = rng.gen::<u64>() % prime;
+
+            let b_shoup = modulus.compute_shoup(b);
+
+            let res = modulus.mul_mod_shoup(a, b, b_shoup);
+            assert_eq!(res, ((a as u128 * b as u128) % (prime as u128)) as u64);
+        }
+    }
+
+    #[test]
+    fn barret_reduction_u128_works() {
+        let mut rng = thread_rng();
+        for _ in 0..1000 {
+            let prime = generate_prime(60, 16, 1 << 60).unwrap();
+            let modulus = Modulus::new(prime);
+            let value: u128 = rng.gen();
+            let res = modulus.barret_reduction_u128(value);
+            assert_eq!(res, (value % (modulus as u128)) as u64);
+        }
+    }
+
+    #[test]
+    fn barret_reduction_u128_perf() {
+        let mut rng = thread_rng();
+        let prime = 1152921504606846577u64;
+        let modulus = Modulus::new(prime);
+        let values = rng
+            .sample_iter(Uniform::new(0, u128::MAX))
+            .take(1 << 26)
+            .collect_vec();
+
+        // let now = std::time::Instant::now();
+        // let res = values
+        //     .iter()
+        //     .map(|v| barret_reduction_u128_m2(*v, modulus, mu_hi, mu_lo))
+        //     .collect_vec();
+        // println!("time barret_reduction_u128_m2: {:?}", now.elapsed());
+
+        let now = std::time::Instant::now();
+        let res = values
+            .iter()
+            .map(|v| modulus.barret_reduction_u128(*v))
+            .collect_vec();
+        println!("time barret_reduction_u128: {:?}", now.elapsed());
+
+        let now = std::time::Instant::now();
+        let expected = values
+            .iter()
+            .map(|v| (*v % (modulus as u128)) as u64)
+            .collect_vec();
+        println!("time baseline: {:?}", now.elapsed());
+
+        assert!(res == expected);
+        // assert!(res2 == expected)
     }
 }
