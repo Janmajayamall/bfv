@@ -12,7 +12,7 @@ impl Modulus {
         let n = 64 - (modulus.leading_zeros() as u64);
         dbg!(n);
         let mu = (1u128 << (2 * n + 3)) / (modulus as u128);
-
+        dbg!(mu);
         Modulus {
             mu_hi: 2,
             mu_lo: 2,
@@ -23,8 +23,16 @@ impl Modulus {
     }
 
     /// Barrett modulur multiplication. Assumes that a and b are < modulus
+    ///
+    /// If either of a and b are greater than modulus then q*mu overflows.
     fn mul_mod_fast(&self, a: u64, b: u64) -> u64 {
-        let mut ab = a as u128 * b as u128;
+        // let mut ab = a as u128 * b as u128;
+        let mut ab = (1u128 << 122) - 1;
+
+        {
+            dbg!(128 - ab.leading_zeros());
+            dbg!(ab % (self.modulus as u128));
+        }
 
         let n = self.mod_bits;
         let alpha = n + 3;
@@ -37,9 +45,12 @@ impl Modulus {
         ab -= q * (self.modulus as u128);
         let mut ab = ab as u64;
 
+        // correction
         if ab >= self.modulus {
             ab -= self.modulus;
         }
+
+        dbg!(ab);
 
         ab
     }
@@ -54,16 +65,20 @@ mod tests {
 
     #[test]
     fn mul_mod_fast_works() {
-        let prime = generate_prime(54, 16, 1 << 54).unwrap();
+        let prime = generate_prime(61, 16, 1 << 61).unwrap();
         let modulus = Modulus::new(prime);
 
         let mut rng = thread_rng();
         let a = rng.gen::<u64>();
         let b = rng.gen::<u64>();
 
-        dbg!(128 - (a as u128 * b as u128).leading_zeros());
+        let p_bits = (128 - (a as u128 * b as u128).leading_zeros()) as u64;
+
+        // let mu_bits = (64 - (modulus.mu.leading_zeros())) as u64;
+        // let prod_bits = p_bits - (modulus.mod_bits - 2) + mu_bits;
+        // dbg!(p_bits, mu_bits, prod_bits);
 
         let res = modulus.mul_mod_fast(a, b);
-        dbg!(res, (a as u128 * b as u128) % (prime as u128));
+        // dbg!(res, (a as u128 * b as u128) % (prime as u128));
     }
 }
