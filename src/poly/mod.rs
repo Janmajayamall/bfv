@@ -2,7 +2,7 @@ use crate::modulus::Modulus;
 use crypto_bigint::U192;
 use fhe_math::{rq::Context, zq::ntt::NttOperator, zq::Modulus as ModulusOld};
 use fhe_util::sample_vec_cbd;
-use itertools::{izip, DedupBy, Itertools};
+use itertools::{izip, Itertools};
 use ndarray::{azip, s, Array2, Axis, IntoNdProducer};
 use num_bigint::{BigInt, BigUint};
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
@@ -343,6 +343,7 @@ impl Poly {
         &self,
         p_context: &Arc<PolyContext>,
         neg_pq_hat_inv_modq: &[u64],
+        neg_pq_hat_inv_modq_shoup: &[u64],
         q_inv_modp: &Array2<u64>,
     ) -> Poly {
         debug_assert!(self.representation == Representation::Coefficient);
@@ -358,21 +359,24 @@ impl Poly {
                 q_rests.iter(),
                 q_inv_modp.outer_iter(),
                 neg_pq_hat_inv_modq.iter(),
+                neg_pq_hat_inv_modq_shoup.iter(),
                 self.context.moduli_ops.iter()
             )
-            .for_each(|(xi, qi_inv_modp, neg_pqi_hat_inv, modqi)| {
-                // TODO: convert this to mul shoup
-                let xi_v = modqi.mul_mod_fast(*xi, *neg_pqi_hat_inv);
-                izip!(
-                    p_rests.iter_mut(),
-                    qi_inv_modp.iter(),
-                    p_context.moduli_ops.iter()
-                )
-                .for_each(|(pxi, qi_inv, modpi)| {
-                    let tmp = modpi.mul_mod_fast(xi_v, *qi_inv);
-                    *pxi = modpi.add_mod_fast(*pxi, tmp);
-                })
-            });
+            .for_each(
+                |(xi, qi_inv_modp, neg_pqi_hat_inv, neg_pq_hat_inv_shoup, modqi)| {
+                    // TODO: replacing mul_mod_fast with mul_mod_shoup only increases perf by 4%
+                    let xi_v = modqi.mul_mod_shoup(*xi, *neg_pqi_hat_inv, *neg_pq_hat_inv_shoup);
+                    izip!(
+                        p_rests.iter_mut(),
+                        qi_inv_modp.iter(),
+                        p_context.moduli_ops.iter()
+                    )
+                    .for_each(|(pxi, qi_inv, modpi)| {
+                        let tmp = modpi.mul_mod_fast(xi_v, *qi_inv);
+                        *pxi = modpi.add_mod_fast(*pxi, tmp);
+                    })
+                },
+            );
         });
         p
     }
@@ -441,6 +445,7 @@ impl Poly {
         p_context: &Arc<PolyContext>,
         pq_context: &Arc<PolyContext>,
         neg_pq_hat_inv_modq: &[u64],
+        neg_pq_hat_inv_modq_shoup: &[u64],
         q_inv_modp: &Array2<u64>,
         p_hat_modq: &Array2<u64>,
         p_hat_inv_modp: &[u64],
@@ -448,7 +453,12 @@ impl Poly {
         p_inv: &[f64],
         alpha_modq: &Array2<u64>,
     ) -> Poly {
-        let p = self.fast_conv_p_over_q(p_context, neg_pq_hat_inv_modq, q_inv_modp);
+        let p = self.fast_conv_p_over_q(
+            p_context,
+            neg_pq_hat_inv_modq,
+            neg_pq_hat_inv_modq_shoup,
+            q_inv_modp,
+        );
 
         // switch p to q
         let q = p.switch_crt_basis(
@@ -976,6 +986,7 @@ mod tests {
         let p_poly = q_poly.fast_conv_p_over_q(
             &p_context,
             &bfv_params.neg_pql_hat_inv_modql[0],
+            &bfv_params.neg_pql_hat_inv_modql_shoup[0],
             &bfv_params.ql_inv_modp[0],
         );
         println!("time: {:?}", now.elapsed());
@@ -1069,6 +1080,7 @@ mod tests {
             &p_context,
             &pq_context,
             &bfv_params.neg_pql_hat_inv_modql[0],
+            &bfv_params.neg_pql_hat_inv_modql_shoup[0],
             &bfv_params.ql_inv_modp[0],
             &bfv_params.pl_hat_modq[0],
             &bfv_params.pl_hat_inv_modpl[0],

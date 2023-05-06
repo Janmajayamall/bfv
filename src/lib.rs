@@ -45,6 +45,7 @@ pub struct BfvParameters {
     // Fast expand CRT basis Q to P to PQ
     // Fast conversion P over Q
     pub neg_pql_hat_inv_modql: Vec<Vec<u64>>,
+    pub neg_pql_hat_inv_modql_shoup: Vec<Vec<u64>>,
     pub ql_inv_modp: Vec<Array2<u64>>,
     //  Switch CRT basis P to Q //
     pub pl_hat_modq: Vec<Array2<u64>>,
@@ -258,6 +259,7 @@ impl BfvParameters {
         // Fast expand CRT basis Q to P to PQ
         // 1. Fast Conv P Over Q //
         let mut neg_pql_hat_inv_modql = vec![];
+        let mut neg_pql_hat_inv_modql_shoup = vec![];
         let mut ql_inv_modp = vec![];
         izip!(poly_contexts.iter(), extension_poly_contexts.iter()).for_each(
             |(q_context, p_context)| {
@@ -266,30 +268,33 @@ impl BfvParameters {
                 let p = p_context.modulus();
 
                 let mut neg_pq_hat_inv_modq = vec![];
+                let mut neg_pq_hat_inv_modq_shoup = vec![];
                 let mut qi_inv_modp = vec![];
 
-                izip!(q_context.moduli.iter()).for_each(|qi| {
+                izip!(q_context.moduli_ops.iter()).for_each(|modqi| {
+                    let qi = modqi.modulus();
                     let q_hat_inv_modqi = BigUint::from_bytes_le(
                         &(&q_dig / qi)
-                            .mod_inverse(BigUintDig::from(*qi))
+                            .mod_inverse(BigUintDig::from(qi))
                             .unwrap()
                             .to_biguint()
                             .unwrap()
                             .to_bytes_le(),
                     );
-                    neg_pq_hat_inv_modq.push(
-                        ((qi - ((&p * q_hat_inv_modqi) % qi)) % qi)
-                            .to_u64()
-                            .unwrap(),
-                    );
+                    let tmp = ((qi - ((&p * q_hat_inv_modqi) % qi)) % qi)
+                        .to_u64()
+                        .unwrap();
+                    neg_pq_hat_inv_modq.push(tmp);
+                    neg_pq_hat_inv_modq_shoup.push(modqi.compute_shoup(tmp));
 
                     p_context
                         .moduli_ops
                         .iter()
-                        .for_each(|pi| qi_inv_modp.push(pi.inv(*qi % pi.modulus())));
+                        .for_each(|pi| qi_inv_modp.push(pi.inv(qi % pi.modulus())));
                 });
 
                 neg_pql_hat_inv_modql.push(neg_pq_hat_inv_modq);
+                neg_pql_hat_inv_modql_shoup.push(neg_pq_hat_inv_modq_shoup);
                 ql_inv_modp.push(
                     Array2::from_shape_vec(
                         (q_context.moduli.len(), p_context.moduli.len()),
@@ -570,6 +575,7 @@ impl BfvParameters {
 
             // Fast expand CRT basis Q to P to PQ
             neg_pql_hat_inv_modql,
+            neg_pql_hat_inv_modql_shoup,
             ql_inv_modp,
             pl_hat_modq,
             pl_hat_inv_modpl,
@@ -638,6 +644,7 @@ impl Ciphertext {
                     &self.params.extension_poly_contexts[level],
                     &self.params.pq_poly_contexts[level],
                     &self.params.neg_pql_hat_inv_modql[level],
+                    &self.params.neg_pql_hat_inv_modql_shoup[level],
                     &self.params.ql_inv_modp[level],
                     &self.params.pl_hat_modq[level],
                     &self.params.pl_hat_inv_modpl[level],

@@ -83,6 +83,7 @@ fn bench_poly(c: &mut Criterion) {
                 q_poly.fast_conv_p_over_q(
                     &p_context,
                     &bfv_params.neg_pql_hat_inv_modql[0],
+                    &bfv_params.neg_pql_hat_inv_modql_shoup[0],
                     &bfv_params.ql_inv_modp[0],
                 );
             })
@@ -109,6 +110,7 @@ fn bench_poly(c: &mut Criterion) {
                         &p_context,
                         &pq_context,
                         &bfv_params.neg_pql_hat_inv_modql[0],
+                        &bfv_params.neg_pql_hat_inv_modql_shoup[0],
                         &bfv_params.ql_inv_modp[0],
                         &bfv_params.pl_hat_modq[0],
                         &bfv_params.pl_hat_inv_modpl[0],
