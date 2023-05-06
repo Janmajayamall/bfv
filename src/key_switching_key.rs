@@ -647,7 +647,10 @@ mod tests {
     #[test]
     fn hybrid_key_switching() {
         let bfv_params = Arc::new(BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
+            &[
+                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
+                60, 60, 60, 60, 60, 60, 60,
+            ],
             65537,
             1 << 8,
         ));
@@ -698,7 +701,7 @@ mod tests {
         let mut rng = thread_rng();
         let mut p = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
         let q = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
-        let modop = Modulus::new(32).unwrap();
+        let modop = Modulus::new(32);
 
         // rayon::ThreadPoolBuilder::new()
         //     .num_threads(10)
@@ -711,18 +714,18 @@ mod tests {
             q.coefficients.axis_iter(Axis(1))
         )
         .par_for_each(|mut a, b| {
-            a[0] += modop.mul(a[0], b[0]);
-            a[1] += modop.mul(a[1], b[1]);
-            a[2] += modop.mul(a[2], b[2]);
-            a[3] += modop.mul(a[5], b[5]);
-            a[4] += modop.mul(a[3], b[3]);
-            a[5] += modop.mul(a[4], b[4]);
+            a[0] += modop.mul_mod_fast(a[0], b[0]);
+            a[1] += modop.mul_mod_fast(a[1], b[1]);
+            a[2] += modop.mul_mod_fast(a[2], b[2]);
+            a[3] += modop.mul_mod_fast(a[5], b[5]);
+            a[4] += modop.mul_mod_fast(a[3], b[3]);
+            a[5] += modop.mul_mod_fast(a[4], b[4]);
         });
         println!("azip! took: {:?}", now.elapsed());
 
         let mut p = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
         let q = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
-        let modop = Modulus::new(32).unwrap();
+        let modop = Modulus::new(32);
 
         let now = std::time::Instant::now();
         izip!(
@@ -730,12 +733,12 @@ mod tests {
             q.coefficients.axis_iter(Axis(1))
         )
         .for_each(|(mut a, b)| {
-            a[0] += modop.mul(a[0], b[0]);
-            a[1] += modop.mul(a[1], b[1]);
-            a[2] += modop.mul(a[2], b[2]);
-            a[3] += modop.mul(a[5], b[5]);
-            a[4] += modop.mul(a[3], b[3]);
-            a[5] += modop.mul(a[4], b[4]);
+            a[0] += modop.mul_mod_fast(a[0], b[0]);
+            a[1] += modop.mul_mod_fast(a[1], b[1]);
+            a[2] += modop.mul_mod_fast(a[2], b[2]);
+            a[3] += modop.mul_mod_fast(a[5], b[5]);
+            a[4] += modop.mul_mod_fast(a[3], b[3]);
+            a[5] += modop.mul_mod_fast(a[4], b[4]);
         });
         println!("izip! took: {:?}", now.elapsed());
     }

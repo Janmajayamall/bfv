@@ -10,14 +10,14 @@ use poly::{Poly, PolyContext, Representation};
 use rand::{distributions::Uniform, prelude::Distribution, CryptoRng, RngCore};
 use std::sync::Arc;
 
-mod key_switching_key;
-mod modulus;
-mod nb_theory;
-mod poly;
-mod utils;
+pub mod key_switching_key;
+pub mod modulus;
+pub mod nb_theory;
+pub mod poly;
+pub mod utils;
 
 #[derive(PartialEq)]
-struct BfvParameters {
+pub struct BfvParameters {
     ciphertext_moduli: Vec<u64>,
     extension_moduli: Vec<u64>,
     ciphertext_moduli_sizes: Vec<usize>,
@@ -986,7 +986,7 @@ mod tests {
 
         dbg!(sk.measure_noise(&ct3, &mut rng));
 
-        params.plaintext_modulus_op.mul_vec(&mut m1, &m2);
+        params.plaintext_modulus_op.mul_mod_fast_vec(&mut m1, &m2);
 
         let res = sk.decrypt(&ct3).decode(Encoding {
             encoding_type: EncodingType::Simd,

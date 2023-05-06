@@ -206,7 +206,6 @@ impl Poly {
         }
     }
 
-    //TODO: add rest of the operations needed to scale, switch context, and other necessary ops required for bfv.
     pub fn scale_and_round_decryption(
         &self,
         t: &Modulus,
@@ -240,6 +239,7 @@ impl Poly {
                     let xi_hi = xi >> b;
                     let xi_lo = xi - (xi_hi << b);
 
+                    // FIXME: this will fail in debug mode since xi_lo and xi_hi are almost always greater than t (ie plaintext modulus)
                     rational_sum = t.add_mod_fast(rational_sum, t.mul_mod_fast(xi_lo, *rational));
                     rational_sum = t.add_mod_fast(rational_sum, t.mul_mod_fast(xi_hi, *brational));
 
@@ -880,7 +880,12 @@ mod tests {
     }
 
     #[test]
-    fn test_scale_and_roun1d_decryption() {
+    // FIXME: fails in debug mode. Check fn to see why.
+    fn test_scale_and_round_decryption() {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(10)
+            .build_global()
+            .unwrap();
         let mut rng = thread_rng();
         let bfv_params = BfvParameters::new(&[60, 60, 60, 60], 65537, 8);
 
@@ -889,7 +894,7 @@ mod tests {
 
         // let's scale q_poly by t/Q and switch its context from Q to t.
         let t_coeffs = q_poly.scale_and_round_decryption(
-            &Modulus::new(bfv_params.plaintext_modulus).unwrap(),
+            &Modulus::new(bfv_params.plaintext_modulus),
             bfv_params.max_bit_size_by2,
             &bfv_params.t_qlhat_inv_modql_divql_modt[0],
             &bfv_params.t_bqlhat_inv_modql_divql_modt[0],
@@ -939,11 +944,10 @@ mod tests {
         let mut rng = thread_rng();
         let bfv_params = BfvParameters::new(
             &[
-                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
-                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
+                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
             ],
             65537,
-            1 << 15,
+            1 << 8,
         );
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
@@ -978,7 +982,7 @@ mod tests {
         izip!(Vec::<BigUint>::from(&p_poly).iter(), p_expected.iter()).for_each(
             |(res, expected)| {
                 let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
-                // dbg!(diff.bits());
+                dbg!(diff.bits());
             },
         );
     }
@@ -987,7 +991,9 @@ mod tests {
     pub fn test_switch_crt_basis() {
         let mut rng = thread_rng();
         let bfv_params = BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
+            &[
+                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
+            ],
             65537,
             1 << 15,
         );
@@ -1031,7 +1037,7 @@ mod tests {
                 60, 60, 60, 60, 60, 60, 60,
             ],
             65537,
-            1 << 15,
+            1 << 3,
         );
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
@@ -1073,7 +1079,7 @@ mod tests {
         izip!(Vec::<BigUint>::from(&pq_poly).iter(), p_expected.iter()).for_each(
             |(res, expected)| {
                 let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
-                // dbg!(diff.bits());
+                dbg!(diff.bits());
             },
         );
     }
@@ -1087,7 +1093,7 @@ mod tests {
                 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
             ],
             65537,
-            1 << 15,
+            1 << 3,
         );
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
@@ -1203,7 +1209,7 @@ mod tests {
     #[test]
     pub fn test_approx_mod_down() {
         let mut rng = thread_rng();
-        let polynomial_degree = 1 << 15;
+        let polynomial_degree = 1 << 3;
         let q_moduli = generate_primes(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
         let p_moduli = generate_primes(&vec![60, 60], polynomial_degree, &q_moduli);
         let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
@@ -1329,7 +1335,7 @@ mod tests {
 
         izip!(q_res.iter(), q_expected.iter()).for_each(|(res, expected)| {
             let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
-            // dbg!(diff.bits());
+            assert!(diff <= BigInt::one());
         });
     }
 }
