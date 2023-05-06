@@ -25,6 +25,9 @@ criterion = "0.3"
 name = "modulus"
 harness = false
 
+[[bench]]
+name = "poly"
+harness = false
 
 [features]
 hexl=[]

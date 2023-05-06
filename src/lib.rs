@@ -49,6 +49,7 @@ pub struct BfvParameters {
     //  Switch CRT basis P to Q //
     pub pl_hat_modq: Vec<Array2<u64>>,
     pub pl_hat_inv_modpl: Vec<Vec<u64>>,
+    pub pl_hat_inv_modpl_shoup: Vec<Vec<u64>>,
     pub pl_inv: Vec<Vec<f64>>,
     pub alphal_modq: Vec<Array2<u64>>,
 
@@ -60,6 +61,7 @@ pub struct BfvParameters {
     // Switch CRT basis Q to P //
     pub ql_hat_modp: Vec<Array2<u64>>,
     pub ql_hat_inv_modql: Vec<Vec<u64>>,
+    pub ql_hat_inv_modql_shoup: Vec<Vec<u64>>,
     pub ql_inv: Vec<Vec<f64>>,
     pub alphal_modp: Vec<Array2<u64>>,
     // Hybrid key switching
@@ -300,6 +302,7 @@ impl BfvParameters {
         // 2. Switch CRT basis P to Q //
         let mut pl_hat_modq = vec![];
         let mut pl_hat_inv_modpl = vec![];
+        let mut pl_hat_inv_modpl_shoup = vec![];
         let mut pl_inv = vec![];
         let mut alphal_modq = vec![];
         izip!(poly_contexts.iter(), extension_poly_contexts.iter()).for_each(
@@ -308,11 +311,13 @@ impl BfvParameters {
                 let p_dig = p_context.modulus_dig();
 
                 let mut p_hat_inv_modp = vec![];
+                let mut p_hat_inv_modp_shoup = vec![];
                 let mut p_inv = vec![];
-                p_context.moduli.iter().for_each(|pi| {
+                p_context.moduli_ops.iter().for_each(|modpi| {
+                    let pi = modpi.modulus();
                     let pihat_inv = BigUint::from_bytes_le(
                         &(&p_dig / pi)
-                            .mod_inverse(BigUintDig::from(*pi))
+                            .mod_inverse(BigUintDig::from(pi))
                             .unwrap()
                             .to_biguint()
                             .unwrap()
@@ -321,7 +326,8 @@ impl BfvParameters {
                     .to_u64()
                     .unwrap();
                     p_hat_inv_modp.push(pihat_inv);
-                    p_inv.push(1.0 / (*pi as f64));
+                    p_hat_inv_modp_shoup.push(modpi.compute_shoup(pihat_inv));
+                    p_inv.push(1.0 / (pi as f64));
                 });
 
                 let mut alpha_modp = vec![];
@@ -347,6 +353,7 @@ impl BfvParameters {
                     .unwrap(),
                 );
                 pl_hat_inv_modpl.push(p_hat_inv_modp);
+                pl_hat_inv_modpl_shoup.push(p_hat_inv_modp_shoup);
                 pl_inv.push(p_inv);
                 alphal_modq.push(
                     Array2::from_shape_vec(
@@ -450,6 +457,7 @@ impl BfvParameters {
         // Switch CRT basis Q to P //
         let mut ql_hat_modp = vec![];
         let mut ql_hat_inv_modql = vec![];
+        let mut ql_hat_inv_modql_shoup = vec![];
         let mut ql_inv = vec![];
         let mut alphal_modp = vec![];
         izip!(poly_contexts.iter(), extension_poly_contexts.iter()).for_each(
@@ -458,11 +466,13 @@ impl BfvParameters {
                 let q_dig = q_context.modulus_dig();
 
                 let mut q_hat_inv_modq = vec![];
+                let mut q_hat_inv_modq_shoup = vec![];
                 let mut q_inv = vec![];
-                q_context.moduli.iter().for_each(|qi| {
+                q_context.moduli_ops.iter().for_each(|modqi| {
+                    let qi = modqi.modulus();
                     let qihat_inv = BigUint::from_bytes_le(
                         &(&q_dig / qi)
-                            .mod_inverse(BigUintDig::from(*qi))
+                            .mod_inverse(BigUintDig::from(qi))
                             .unwrap()
                             .to_biguint()
                             .unwrap()
@@ -471,7 +481,8 @@ impl BfvParameters {
                     .to_u64()
                     .unwrap();
                     q_hat_inv_modq.push(qihat_inv);
-                    q_inv.push(1.0 / (*qi as f64));
+                    q_hat_inv_modq_shoup.push(modqi.compute_shoup(qihat_inv));
+                    q_inv.push(1.0 / (qi as f64));
                 });
 
                 let mut alpha_modp = vec![];
@@ -497,6 +508,7 @@ impl BfvParameters {
                     .unwrap(),
                 );
                 ql_hat_inv_modql.push(q_hat_inv_modq);
+                ql_hat_inv_modql_shoup.push(q_hat_inv_modq_shoup);
                 ql_inv.push(q_inv);
                 alphal_modp.push(
                     Array2::from_shape_vec(
@@ -561,6 +573,7 @@ impl BfvParameters {
             ql_inv_modp,
             pl_hat_modq,
             pl_hat_inv_modpl,
+            pl_hat_inv_modpl_shoup,
             pl_inv,
             alphal_modq,
 
@@ -572,6 +585,7 @@ impl BfvParameters {
             // Switch CRT basis Q to P //
             ql_hat_modp,
             ql_hat_inv_modql,
+            ql_hat_inv_modql_shoup,
             ql_inv,
             alphal_modp,
             max_bit_size_by2: b,
@@ -606,6 +620,7 @@ impl Ciphertext {
                     &self.params.extension_poly_contexts[level],
                     &self.params.ql_hat_modp[level],
                     &self.params.ql_hat_inv_modql[level],
+                    &self.params.ql_hat_inv_modql_shoup[level],
                     &self.params.ql_inv[level],
                     &self.params.alphal_modp[level],
                 )
@@ -626,6 +641,7 @@ impl Ciphertext {
                     &self.params.ql_inv_modp[level],
                     &self.params.pl_hat_modq[level],
                     &self.params.pl_hat_inv_modpl[level],
+                    &self.params.pl_hat_inv_modpl_shoup[level],
                     &self.params.pl_inv[level],
                     &self.params.alphal_modq[level],
                 );

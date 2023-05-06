@@ -382,6 +382,7 @@ impl Poly {
         p_context: &Arc<PolyContext>,
         q_hat_modp: &Array2<u64>,
         q_hat_inv_modq: &[u64],
+        q_hat_inv_modq_shoup: &[u64],
         q_inv: &[f64],
         alpha_modp: &Array2<u64>,
     ) -> Poly {
@@ -399,12 +400,13 @@ impl Poly {
             izip!(
                 q_rests.iter(),
                 q_hat_inv_modq.iter(),
+                q_hat_inv_modq_shoup.iter(),
                 q_inv.iter(),
                 self.context.moduli_ops.iter()
             )
-            .for_each(|(xi, qi_hat_inv, q_inv, modq)| {
-                // TODO: change this to mul_shoup
-                let tmp = modq.mul_mod_fast(*xi, *qi_hat_inv);
+            .for_each(|(xi, qi_hat_inv, qi_hat_inv_shoup, q_inv, modq)| {
+                // TODO: replacing mul_mod_fast with mul_mod_shoup only increases perf by 2.8% or so. I think treasure lies somewhere else
+                let tmp = modq.mul_mod_shoup(*xi, *qi_hat_inv, *qi_hat_inv_shoup);
                 xi_q_hat_inv_modq.push(tmp);
 
                 nu += tmp as f64 * q_inv;
@@ -442,13 +444,21 @@ impl Poly {
         q_inv_modp: &Array2<u64>,
         p_hat_modq: &Array2<u64>,
         p_hat_inv_modp: &[u64],
+        p_hat_inv_modp_shoup: &[u64],
         p_inv: &[f64],
         alpha_modq: &Array2<u64>,
     ) -> Poly {
         let p = self.fast_conv_p_over_q(p_context, neg_pq_hat_inv_modq, q_inv_modp);
 
         // switch p to q
-        let q = p.switch_crt_basis(&self.context, p_hat_modq, p_hat_inv_modp, p_inv, alpha_modq);
+        let q = p.switch_crt_basis(
+            &self.context,
+            p_hat_modq,
+            p_hat_inv_modp,
+            p_hat_inv_modp_shoup,
+            p_inv,
+            alpha_modq,
+        );
 
         let mut pq = Poly::zero(pq_context, &Representation::Coefficient);
         izip!(
@@ -483,6 +493,7 @@ impl Poly {
         p_context: &Arc<PolyContext>,
         q_hat_modp: &Array2<u64>,
         q_hat_inv_modq: &[u64],
+        q_hat_inv_modq_shoup: &[u64],
         q_inv: &[f64],
         alpha_modp: &Array2<u64>,
     ) -> Poly {
@@ -495,7 +506,14 @@ impl Poly {
             self.change_representation(Representation::Coefficient);
         }
 
-        let mut p = self.switch_crt_basis(p_context, q_hat_modp, q_hat_inv_modq, q_inv, alpha_modp);
+        let mut p = self.switch_crt_basis(
+            p_context,
+            q_hat_modp,
+            q_hat_inv_modq,
+            q_hat_inv_modq_shoup,
+            q_inv,
+            alpha_modp,
+        );
         p.change_representation(representation_cache.clone());
 
         let p_moduli_len = p_context.moduli.len();
@@ -1007,6 +1025,7 @@ mod tests {
             &p_context,
             &bfv_params.ql_hat_modp[0],
             &bfv_params.ql_hat_inv_modql[0],
+            &bfv_params.ql_hat_inv_modql_shoup[0],
             &bfv_params.ql_inv[0],
             &bfv_params.alphal_modp[0],
         );
@@ -1053,6 +1072,7 @@ mod tests {
             &bfv_params.ql_inv_modp[0],
             &bfv_params.pl_hat_modq[0],
             &bfv_params.pl_hat_inv_modpl[0],
+            &bfv_params.pl_hat_inv_modpl_shoup[0],
             &bfv_params.pl_inv[0],
             &bfv_params.alphal_modq[0],
         );
