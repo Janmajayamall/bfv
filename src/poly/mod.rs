@@ -582,15 +582,15 @@ impl Poly {
         degree: usize,
         q_hat_inv_modq: &[u64],
         q_hat_modp: &Array2<u64>,
-        p_moduli: &[u64],
+        p_moduli_ops: &[Modulus],
     ) -> Array2<u64> {
-        let mut p = Array2::<u64>::zeros((p_moduli.len(), degree));
+        let mut p = Array2::<u64>::zeros((p_moduli_ops.len(), degree));
 
         // TODO: the computation within each loop isn't much. Does it make sense to parallelize this by Axis(1) or shall
         // we switch to parallelizing by Axis(0)
         azip!(p.axis_iter_mut(Axis(1)), q_coefficients.axis_iter(Axis(1))).par_for_each(
             |mut p_rests, q_rests| {
-                let mut sum = vec![0u128; p_moduli.len()];
+                let mut sum = vec![0u128; p_moduli_ops.len()];
                 izip!(
                     q_rests.iter(),
                     q_hat_inv_modq.iter(),
@@ -600,14 +600,13 @@ impl Poly {
                 .for_each(|(xi, qi_hat_inv_modqi, qi_hat_modp, modqi)| {
                     // TODO: change this to mul shoup
                     let tmp = modqi.mul_mod_fast(*xi, *qi_hat_inv_modqi);
-                    izip!(sum.iter_mut(), qi_hat_modp.iter(), p_moduli.iter()).for_each(
-                        |(vj, qi_hat_modpj, modpj)| *vj += (tmp as u128 * *qi_hat_modpj as u128),
-                    );
+                    izip!(sum.iter_mut(), qi_hat_modp.iter()).for_each(|(vj, qi_hat_modpj)| {
+                        *vj += (tmp as u128 * *qi_hat_modpj as u128)
+                    });
                 });
 
-                //TODO: replace % with Barret reduction u128 (like openfhe - https://github.com/openfheorg/openfhe-development/blob/303b8c1d67384fa6273180ba7b62d4bc27ea77e3/src/core/lib/lattice/hal/default/dcrtpoly.cpp#L1438)
-                izip!(p_rests.iter_mut(), sum.iter(), p_moduli.iter())
-                    .for_each(|(vj, vj_u128, modpj)| *vj = (*vj_u128 % (*modpj as u128)) as u64);
+                izip!(p_rests.iter_mut(), sum.iter(), p_moduli_ops.iter())
+                    .for_each(|(vj, vj_u128, modpj)| *vj = modpj.barret_reduction_u128(*vj_u128));
             },
         );
         p
@@ -674,10 +673,10 @@ impl Poly {
             izip!(
                 p_to_q_rests.iter_mut(),
                 sum.iter(),
-                qp_context.moduli.iter()
+                qp_context.moduli_ops.iter()
             )
             .for_each(|(xi, xi_u128, modq)| {
-                *xi = (xi_u128 % (*modq as u128)) as u64;
+                *xi = modq.barret_reduction_u128(*xi_u128);
             });
         });
 
@@ -882,30 +881,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{nb_theory::generate_prime, BfvParameters};
-
-    fn generate_primes(sizes: &[usize], polynomial_degree: usize, skip_list: &[u64]) -> Vec<u64> {
-        let mut moduli = vec![];
-        sizes.iter().for_each(|size| {
-            let mut upper_bound = 1u64 << size;
-            loop {
-                if let Some(prime) =
-                    generate_prime(*size, 2 * polynomial_degree as u64, upper_bound)
-                {
-                    if !moduli.contains(&prime) && !skip_list.contains(&prime) {
-                        moduli.push(prime);
-                        break;
-                    } else {
-                        upper_bound = prime;
-                    }
-                } else {
-                    // not enough primes
-                    panic!("Not enough primes!");
-                }
-            }
-        });
-        moduli
-    }
+    use crate::{nb_theory::generate_primes_vec, BfvParameters};
 
     #[test]
     // FIXME: fails in debug mode. Check fn to see why.
@@ -1177,7 +1153,7 @@ mod tests {
     pub fn test_approx_switch_crt_basis() {
         let mut rng = thread_rng();
         let polynomial_degree = 1 << 15;
-        let p_moduli = generate_primes(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
+        let p_moduli = generate_primes_vec(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
         let q_moduli = p_moduli[..3].to_vec();
 
         let q_context = Arc::new(PolyContext::new(&q_moduli, polynomial_degree));
@@ -1218,7 +1194,7 @@ mod tests {
             q_context.degree,
             &q_hat_inv_modq,
             &q_hat_modp,
-            &p_moduli,
+            &p_context.moduli_ops,
         );
         p_poly.coefficients = p_coefficients;
         println!("time: {:?}", now.elapsed());
@@ -1234,7 +1210,7 @@ mod tests {
             .collect_vec();
         izip!(Vec::<BigUint>::from(&p_poly).iter(), p_expected.iter()).for_each(|(r, e)| {
             let mut diff = r.to_bigint().unwrap() - e.to_bigint().unwrap();
-            // dbg!(r, e, diff.bits());
+            dbg!(r, e, diff.bits());
         })
     }
 
@@ -1242,8 +1218,8 @@ mod tests {
     pub fn test_approx_mod_down() {
         let mut rng = thread_rng();
         let polynomial_degree = 1 << 3;
-        let q_moduli = generate_primes(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
-        let p_moduli = generate_primes(&vec![60, 60], polynomial_degree, &q_moduli);
+        let q_moduli = generate_primes_vec(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
+        let p_moduli = generate_primes_vec(&vec![60, 60], polynomial_degree, &q_moduli);
         let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
 
         let q_context = Arc::new(PolyContext::new(&q_moduli, polynomial_degree));

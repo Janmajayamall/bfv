@@ -1,7 +1,7 @@
 use crate::modulus::Modulus;
 use fhe_math::zq::{ntt::NttOperator, Modulus as ModulusOld};
 use itertools::{izip, Itertools};
-use nb_theory::generate_prime;
+use nb_theory::{generate_prime, generate_primes_vec};
 use ndarray::{Array2, MathCell};
 use num_bigint::BigUint;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
@@ -107,46 +107,16 @@ impl BfvParameters {
         polynomial_degree: usize,
     ) -> BfvParameters {
         // generate primes
-        let mut ciphertext_moduli = vec![];
-        ciphertext_moduli_sizes.iter().for_each(|size| {
-            let mut upper_bound = 1u64 << size;
-            loop {
-                if let Some(prime) =
-                    generate_prime(*size, 2 * polynomial_degree as u64, upper_bound)
-                {
-                    if !ciphertext_moduli.contains(&prime) {
-                        ciphertext_moduli.push(prime);
-                        break;
-                    } else {
-                        upper_bound = prime;
-                    }
-                } else {
-                    // not enough primes
-                    panic!("Not enough primes!");
-                }
-            }
-        });
+        let ciphertext_moduli =
+            generate_primes_vec(ciphertext_moduli_sizes, polynomial_degree, &vec![]);
 
         // generate extension modulus P
-        let mut extension_moduli = vec![];
-        ciphertext_moduli_sizes.iter().for_each(|size| {
-            let mut upper_bound = 1u64 << size;
-            loop {
-                if let Some(prime) =
-                    generate_prime(*size, 2 * polynomial_degree as u64, upper_bound)
-                {
-                    if !ciphertext_moduli.contains(&prime) && !extension_moduli.contains(&prime) {
-                        extension_moduli.push(prime);
-                        break;
-                    } else {
-                        upper_bound = prime;
-                    }
-                } else {
-                    // not enough primes
-                    panic!("Not enough primes!");
-                }
-            }
-        });
+        // P = Q
+        let extension_moduli = generate_primes_vec(
+            ciphertext_moduli_sizes,
+            polynomial_degree,
+            &ciphertext_moduli,
+        );
 
         // create contexts for all levels
         let moduli_count = ciphertext_moduli.len();

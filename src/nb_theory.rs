@@ -2,6 +2,30 @@ use fhe_math::zq::Modulus;
 use num_bigint_dig::{prime::probably_prime, BigUint};
 use rand::{thread_rng, Rng};
 
+pub fn generate_primes_vec(
+    sizes: &[usize],
+    polynomial_degree: usize,
+    skip_list: &[u64],
+) -> Vec<u64> {
+    let mut primes = vec![];
+    sizes.iter().for_each(|s| {
+        let mut upper_bound = 1u64 << s;
+        loop {
+            if let Some(p) = generate_prime(*s, (2 * polynomial_degree) as u64, upper_bound) {
+                if !primes.contains(&p) && !skip_list.contains(&p) {
+                    primes.push(p);
+                    break;
+                } else {
+                    upper_bound = p;
+                }
+            } else {
+                panic!("Not enough primes");
+            }
+        }
+    });
+    primes
+}
+
 /// Finds prime such that prime % n == 1
 pub fn generate_prime(num_bits: usize, modulo: u64, upper_bound: u64) -> Option<u64> {
     let leading_zeros = (64 - num_bits) as u32;

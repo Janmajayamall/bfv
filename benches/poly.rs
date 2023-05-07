@@ -1,11 +1,18 @@
 use std::time::Duration;
 
 use bfv::{
+    nb_theory::generate_primes_vec,
     poly::{Poly, PolyContext, Representation},
     BfvParameters,
 };
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use itertools::izip;
+use ndarray::Array2;
+use num_bigint::BigUint;
+use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
+use num_traits::{FromPrimitive, ToPrimitive};
 use rand::thread_rng;
+use std::sync::Arc;
 
 fn bench_poly(c: &mut Criterion) {
     let mut group = c.benchmark_group("poly");
@@ -143,6 +150,143 @@ fn bench_poly(c: &mut Criterion) {
                     &bfv_params.ql_hat_inv_modql_shoup[0],
                     &bfv_params.ql_inv[0],
                     &bfv_params.alphal_modp[0],
+                );
+            })
+        });
+    }
+
+    {
+        let p_moduli = generate_primes_vec(
+            &vec![60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
+            degree,
+            &[],
+        );
+        let q_moduli = generate_primes_vec(&vec![60, 60, 60], degree, &p_moduli);
+
+        let q_context = Arc::new(PolyContext::new(&q_moduli, degree));
+        let p_context = Arc::new(PolyContext::new(&p_moduli, degree));
+
+        // Pre-computation
+        let mut q_hat_inv_modq = vec![];
+        let mut q_hat_modp = vec![];
+        let q = q_context.modulus();
+        let q_dig = q_context.modulus_dig();
+        izip!(q_context.moduli.iter()).for_each(|(qi)| {
+            let qi_hat_inv_modqi = (&q_dig / *qi)
+                .mod_inverse(BigUintDig::from_u64(*qi).unwrap())
+                .unwrap()
+                .to_biguint()
+                .unwrap()
+                .to_u64()
+                .unwrap();
+
+            q_hat_inv_modq.push(qi_hat_inv_modqi);
+
+            izip!(p_moduli.iter())
+                .for_each(|pj| q_hat_modp.push(((&q / qi) % pj).to_u64().unwrap()));
+        });
+        let q_hat_modp =
+            Array2::<u64>::from_shape_vec((q_context.moduli.len(), p_moduli.len()), q_hat_modp)
+                .unwrap();
+        let q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
+
+        group.bench_function(BenchmarkId::new("approximate_switch_crt_basis", ""), |b| {
+            b.iter(|| {
+                Poly::approx_switch_crt_basis(
+                    &q_poly.coefficients,
+                    &q_context.moduli_ops,
+                    q_context.degree,
+                    &q_hat_inv_modq,
+                    &q_hat_modp,
+                    &p_context.moduli_ops,
+                );
+            })
+        });
+    }
+
+    {
+        let q_moduli = generate_primes_vec(
+            &vec![60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
+            degree,
+            &[],
+        );
+        let p_moduli = generate_primes_vec(&vec![60, 60, 60], degree, &q_moduli);
+        let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
+
+        let q_context = Arc::new(PolyContext::new(&q_moduli, degree));
+        let p_context = Arc::new(PolyContext::new(&p_moduli, degree));
+        let qp_context = Arc::new(PolyContext::new(&qp_moduli, degree));
+
+        // just few checks
+        let q_size = q_context.moduli.len();
+        let p_size = p_context.moduli.len();
+        let qp_size = q_size + p_size;
+        izip!(
+            qp_context.moduli_ops.iter().skip(q_size),
+            p_context.moduli_ops.iter()
+        )
+        .for_each(|(a, b)| {
+            assert_eq!(a, b);
+        });
+        izip!(
+            qp_context.ntt_ops.iter().skip(q_size),
+            p_context.ntt_ops.iter()
+        )
+        .for_each(|(a, b)| {
+            assert_eq!(a, b);
+        });
+
+        // Pre computation
+        let p = p_context.modulus();
+        let p_dig = p_context.modulus_dig();
+        let mut p_hat_inv_modp = vec![];
+        let mut p_hat_modq = vec![];
+        p_context.moduli.iter().for_each(|(pi)| {
+            p_hat_inv_modp.push(
+                (&p_dig / pi)
+                    .mod_inverse(BigUintDig::from_u64(*pi).unwrap())
+                    .unwrap()
+                    .to_biguint()
+                    .unwrap()
+                    .to_u64()
+                    .unwrap(),
+            );
+
+            // pi_hat_modq
+            let p_hat = &p / pi;
+            q_context
+                .moduli
+                .iter()
+                .for_each(|qi| p_hat_modq.push((&p_hat % qi).to_u64().unwrap()));
+        });
+        let p_hat_modq =
+            Array2::from_shape_vec((p_context.moduli.len(), q_context.moduli.len()), p_hat_modq)
+                .unwrap();
+        let mut p_inv_modq = vec![];
+        q_context.moduli.iter().for_each(|qi| {
+            p_inv_modq.push(
+                p_dig
+                    .clone()
+                    .mod_inverse(BigUintDig::from_u64(*qi).unwrap())
+                    .unwrap()
+                    .to_biguint()
+                    .unwrap()
+                    .to_u64()
+                    .unwrap(),
+            );
+        });
+
+        let mut qp_poly = Poly::random(&qp_context, &Representation::Evaluation, &mut rng);
+
+        group.bench_function(BenchmarkId::new("approximate_mod_down", ""), |b| {
+            b.iter(|| {
+                Poly::approx_mod_down(
+                    &qp_poly.coefficients,
+                    &qp_context,
+                    &p_context,
+                    &p_hat_inv_modp,
+                    &p_hat_modq,
+                    &p_inv_modq,
                 );
             })
         });

@@ -147,6 +147,7 @@ struct HybridKeySwitchingKey {
     q_mod_ops_parts: Vec<Vec<Modulus>>,
     q_hat_modp_parts: Vec<Array2<u64>>,
     p_moduli_parts: Vec<Vec<u64>>,
+    p_moduli_parts_ops: Vec<Vec<Modulus>>,
     p_hat_inv_modp: Vec<u64>,
     p_hat_modq: Array2<u64>,
     p_inv_modq: Vec<u64>,
@@ -230,7 +231,9 @@ impl HybridKeySwitchingKey {
         let mut q_hat_inv_modq_parts = vec![];
         let mut q_hat_modp_parts = vec![];
         let mut p_moduli_parts = vec![];
+        let mut p_moduli_parts_ops = vec![];
         let mut q_mod_ops_parts = vec![];
+
         q_moduli
             .chunks(alpha)
             .enumerate()
@@ -281,6 +284,8 @@ impl HybridKeySwitchingKey {
                 };
 
                 let p_whole = [p_start, p_mid, p_moduli.clone()].concat();
+                let p_whole_moduli_ops = p_whole.iter().map(|v| Modulus::new(*v)).collect_vec();
+                p_moduli_parts_ops.push(p_whole_moduli_ops);
 
                 let mut q_hat_modp = vec![];
                 q_parts_moduli.iter().for_each(|qji| {
@@ -359,6 +364,7 @@ impl HybridKeySwitchingKey {
             q_hat_inv_modq_parts,
             q_hat_modp_parts,
             p_moduli_parts,
+            p_moduli_parts_ops,
             q_mod_ops_parts,
             p_hat_inv_modp,
             p_hat_modq,
@@ -398,7 +404,7 @@ impl HybridKeySwitchingKey {
                 poly.context.degree,
                 &self.q_hat_inv_modq_parts[i],
                 &self.q_hat_modp_parts[i],
-                &self.p_moduli_parts[i],
+                &self.p_moduli_parts_ops[i],
             );
 
             // TODO: can you parallelize following 3 operations ?
