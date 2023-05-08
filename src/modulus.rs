@@ -371,6 +371,37 @@ impl Modulus {
             .take(size)
             .collect()
     }
+
+    /// Switch modulus of values from old_modulus to new_modulus
+    ///
+    /// delta = abs(o - n)
+    /// if n >= o:
+    ///     if v > o/2:
+    ///         v' = v + delta
+    ///     else:
+    ///         v' = v
+    /// else:
+    ///     if v > o/2:
+    ///         v' = (v - delta) % n
+    ///     else:
+    ///         v' = v % n
+    pub fn switch_modulus(values: &mut [u64], old_modulus: u64, new_modulus: u64) {
+        let delta = if old_modulus > new_modulus {
+            old_modulus - new_modulus
+        } else {
+            new_modulus - old_modulus
+        };
+        let o_half = old_modulus >> 1;
+        values.iter_mut().for_each(|a| {
+            if new_modulus > old_modulus && *a > o_half {
+                *a += delta;
+            } else if *a > o_half {
+                *a = (*a - (delta % new_modulus)) % new_modulus
+            } else {
+                *a = *a % new_modulus
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -542,5 +573,28 @@ mod tests {
 
         assert!(res == expected);
         // assert!(res2 == expected)
+    }
+
+    #[test]
+    fn switch_modulus_works() {
+        let mut rng = thread_rng();
+        let prime = generate_prime(60, 16, 1 << 60).unwrap();
+        let prime2 = generate_prime(52, 16, 1 << 52).unwrap();
+
+        let vp = Modulus::new(prime).random_vec(8, &mut rng);
+        let mut vp_res = vp.clone();
+        Modulus::switch_modulus(&mut vp_res, prime, prime2);
+        assert_eq!(
+            vp_res,
+            vp.iter()
+                .map(|v| {
+                    if *v > (prime >> 1) {
+                        prime2 - ((prime - v) % prime2)
+                    } else {
+                        *v % prime2
+                    }
+                })
+                .collect_vec()
+        );
     }
 }

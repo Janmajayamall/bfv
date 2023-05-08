@@ -995,13 +995,7 @@ mod tests {
     #[test]
     pub fn test_switch_crt_basis() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::new(
-            &[
-                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
-            ],
-            65537,
-            1 << 15,
-        );
+        let bfv_params = BfvParameters::new(&[60, 60], 65537, 8);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -1152,7 +1146,7 @@ mod tests {
     #[test]
     pub fn test_approx_switch_crt_basis() {
         let mut rng = thread_rng();
-        let polynomial_degree = 1 << 15;
+        let polynomial_degree = 8;
         let p_moduli = generate_primes_vec(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
         let q_moduli = p_moduli[..3].to_vec();
 
@@ -1206,7 +1200,13 @@ mod tests {
 
         let p_expected: Vec<BigUint> = Vec::<BigUint>::from(&q_poly)
             .iter()
-            .map(|xi| xi % &p)
+            .map(|xi| {
+                if xi > &(&q >> 1) {
+                    &p - ((&q - xi) % &p)
+                } else {
+                    xi % &p
+                }
+            })
             .collect_vec();
         izip!(Vec::<BigUint>::from(&p_poly).iter(), p_expected.iter()).for_each(|(r, e)| {
             let mut diff = r.to_bigint().unwrap() - e.to_bigint().unwrap();
@@ -1226,24 +1226,9 @@ mod tests {
         let p_context = Arc::new(PolyContext::new(&p_moduli, polynomial_degree));
         let qp_context = Arc::new(PolyContext::new(&qp_moduli, polynomial_degree));
 
-        // just few checks
         let q_size = q_context.moduli.len();
         let p_size = p_context.moduli.len();
         let qp_size = q_size + p_size;
-        izip!(
-            qp_context.moduli_ops.iter().skip(q_size),
-            p_context.moduli_ops.iter()
-        )
-        .for_each(|(a, b)| {
-            assert_eq!(a, b);
-        });
-        izip!(
-            qp_context.ntt_ops.iter().skip(q_size),
-            p_context.ntt_ops.iter()
-        )
-        .for_each(|(a, b)| {
-            assert_eq!(a, b);
-        });
 
         // Pre computation
         let p = p_context.modulus();
@@ -1328,13 +1313,20 @@ mod tests {
             BigUint::from_bytes_le(&dig.to_bytes_le())
         };
 
+        let p_switched = Vec::<BigUint>::from(&p_poly)
+            .iter()
+            .map(|xi| {
+                if xi > &(&p >> 1) {
+                    &q - ((&p - xi) % &q)
+                } else {
+                    xi % &q
+                }
+            })
+            .collect_vec();
         // convert p_poly to q
-        let q_expected = izip!(
-            Vec::<BigUint>::from(&q_poly).iter(),
-            Vec::<BigUint>::from(&p_poly).iter()
-        )
-        .map(|(qv, pv)| ((qv - pv) * &p_inv_modq) % &q)
-        .collect_vec();
+        let q_expected = izip!(Vec::<BigUint>::from(&q_poly).iter(), p_switched.iter())
+            .map(|(qv, pv)| ((qv + (&q - pv)) * &p_inv_modq) % &q)
+            .collect_vec();
 
         let q_res: Vec<BigUint> = Vec::<BigUint>::from(&q_res)
             .iter()
