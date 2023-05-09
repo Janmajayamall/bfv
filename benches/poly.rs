@@ -5,7 +5,7 @@ use bfv::{
     poly::{Poly, PolyContext, Representation},
     BfvParameters,
 };
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use itertools::izip;
 use ndarray::Array2;
 use num_bigint::BigUint;
@@ -220,21 +220,7 @@ fn bench_poly(c: &mut Criterion) {
         // just few checks
         let q_size = q_context.moduli.len();
         let p_size = p_context.moduli.len();
-        let qp_size = q_size + p_size;
-        izip!(
-            qp_context.moduli_ops.iter().skip(q_size),
-            p_context.moduli_ops.iter()
-        )
-        .for_each(|(a, b)| {
-            assert_eq!(a, b);
-        });
-        izip!(
-            qp_context.ntt_ops.iter().skip(q_size),
-            p_context.ntt_ops.iter()
-        )
-        .for_each(|(a, b)| {
-            assert_eq!(a, b);
-        });
+        let qp_size: usize = q_size + p_size;
 
         // Pre computation
         let p = p_context.modulus();
@@ -277,17 +263,20 @@ fn bench_poly(c: &mut Criterion) {
         });
 
         let mut qp_poly = Poly::random(&qp_context, &Representation::Evaluation, &mut rng);
-
         group.bench_function(BenchmarkId::new("approximate_mod_down", ""), |b| {
-            b.iter(|| {
-                qp_poly.approx_mod_down(
-                    &q_context,
-                    &p_context,
-                    &p_hat_inv_modp,
-                    &p_hat_modq,
-                    &p_inv_modq,
-                );
-            })
+            b.iter_batched(
+                || qp_poly.clone(),
+                |mut p| {
+                    p.approx_mod_down(
+                        &q_context,
+                        &p_context,
+                        &p_hat_inv_modp,
+                        &p_hat_modq,
+                        &p_inv_modq,
+                    );
+                },
+                BatchSize::SmallInput,
+            )
         });
     }
 }

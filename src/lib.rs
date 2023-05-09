@@ -18,12 +18,12 @@ pub mod utils;
 
 #[derive(PartialEq)]
 pub struct BfvParameters {
-    ciphertext_moduli: Vec<u64>,
-    extension_moduli: Vec<u64>,
-    ciphertext_moduli_sizes: Vec<usize>,
-    pub ciphertext_poly_contexts: Vec<Arc<PolyContext>>,
-    pub extension_poly_contexts: Vec<Arc<PolyContext>>,
-    pub pq_poly_contexts: Vec<Arc<PolyContext>>,
+    ciphertext_moduli: Box<[u64]>,
+    extension_moduli: Box<[u64]>,
+    ciphertext_moduli_sizes: Box<[usize]>,
+    pub ciphertext_poly_contexts: Box<[Arc<PolyContext>]>,
+    pub extension_poly_contexts: Box<[Arc<PolyContext>]>,
+    pub pq_poly_contexts: Box<[Arc<PolyContext>]>,
 
     pub plaintext_modulus: u64,
     pub plaintext_modulus_op: Modulus,
@@ -522,12 +522,13 @@ impl BfvParameters {
         .unwrap();
 
         BfvParameters {
-            ciphertext_moduli,
-            extension_moduli,
-            ciphertext_moduli_sizes: ciphertext_moduli_sizes.to_vec(),
-            ciphertext_poly_contexts: poly_contexts,
-            extension_poly_contexts,
-            pq_poly_contexts,
+            ciphertext_moduli: ciphertext_moduli.into_boxed_slice(),
+            extension_moduli: extension_moduli.into_boxed_slice(),
+            ciphertext_moduli_sizes: ciphertext_moduli_sizes.to_vec().into_boxed_slice(),
+            ciphertext_poly_contexts: poly_contexts.into_boxed_slice(),
+            extension_poly_contexts: extension_poly_contexts.into_boxed_slice(),
+            pq_poly_contexts: pq_poly_contexts.into_boxed_slice(),
+
             plaintext_modulus,
             plaintext_modulus_op,
             plaintext_ntt_op,
@@ -578,6 +579,8 @@ struct Ciphertext {
 
 impl Ciphertext {
     pub fn multiply1(&mut self, rhs: &mut Ciphertext) -> Ciphertext {
+        let f = self.params.ciphertext_moduli[2];
+
         debug_assert!(self.params == rhs.params);
         debug_assert!(self.c.len() == 2);
         debug_assert!(rhs.c.len() == 2);
@@ -989,7 +992,12 @@ mod tests {
     }
 
     #[test]
-    fn trial() {
-        dbg!(BfvParameters::noise_ks(7, 3.2, 1 << 8, 60));
+    fn print_params_size() {
+        let params = BfvParameters::new(
+            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
+            65537,
+            1 << 15,
+        );
+        dbg!(std::mem::size_of_val(&params));
     }
 }

@@ -146,7 +146,6 @@ struct HybridKeySwitchingKey {
     q_hat_inv_modq_parts: Vec<Vec<u64>>,
     q_mod_ops_parts: Vec<Vec<Modulus>>,
     q_hat_modp_parts: Vec<Array2<u64>>,
-    p_moduli_parts: Vec<Vec<u64>>,
     p_moduli_parts_ops: Vec<Vec<Modulus>>,
     p_hat_inv_modp: Vec<u64>,
     p_hat_modq: Array2<u64>,
@@ -230,7 +229,6 @@ impl HybridKeySwitchingKey {
         // But this isn't acceptable. Change this to Array2 and adjust for last part somehow.
         let mut q_hat_inv_modq_parts = vec![];
         let mut q_hat_modp_parts = vec![];
-        let mut p_moduli_parts = vec![];
         let mut p_moduli_parts_ops = vec![];
         let mut q_mod_ops_parts = vec![];
 
@@ -284,8 +282,6 @@ impl HybridKeySwitchingKey {
                 };
 
                 let p_whole = [p_start, p_mid, p_moduli.clone()].concat();
-                let p_whole_moduli_ops = p_whole.iter().map(|v| Modulus::new(*v)).collect_vec();
-                p_moduli_parts_ops.push(p_whole_moduli_ops);
 
                 let mut q_hat_modp = vec![];
                 q_parts_moduli.iter().for_each(|qji| {
@@ -299,7 +295,9 @@ impl HybridKeySwitchingKey {
                 )
                 .unwrap();
                 q_hat_modp_parts.push(q_hat_modp);
-                p_moduli_parts.push(p_whole);
+
+                let p_whole_moduli_ops = p_whole.iter().map(|v| Modulus::new(*v)).collect_vec();
+                p_moduli_parts_ops.push(p_whole_moduli_ops);
             });
         ksk_ctx.moduli_ops.chunks(alpha).for_each(|q_mod_ops| {
             q_mod_ops_parts.push(q_mod_ops.to_vec());
@@ -363,7 +361,6 @@ impl HybridKeySwitchingKey {
             seed,
             q_hat_inv_modq_parts,
             q_hat_modp_parts,
-            p_moduli_parts,
             p_moduli_parts_ops,
             q_mod_ops_parts,
             p_hat_inv_modp,
@@ -462,13 +459,15 @@ impl HybridKeySwitchingKey {
 
         // perform key switching
         let mut c0_out = &poly_parts_qp[0] * &self.c0s[0];
-        let mut c1_out = &poly_parts_qp[0] * &self.c1s[0];
+        poly_parts_qp[0] *= &self.c1s[0];
+        let mut c1_out = poly_parts_qp[0].clone();
 
-        izip!(poly_parts_qp.iter(), self.c0s.iter(), self.c1s.iter())
+        izip!(poly_parts_qp.iter_mut(), self.c0s.iter(), self.c1s.iter())
             .skip(1)
             .for_each(|(p, c0i, c1i)| {
-                c0_out += &(p * c0i);
-                c1_out += &(p * c1i);
+                c0_out += &(c0i * p);
+                *p *= &c1i;
+                c1_out += &p
             });
 
         // switch results from QP to Q
@@ -601,9 +600,9 @@ mod tests {
     #[test]
     fn key_switching_works() {
         let bfv_params = Arc::new(BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
+            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
             65537,
-            1 << 8,
+            1 << 15,
         ));
         let ct_ctx = bfv_params.ciphertext_poly_contexts[0].clone();
         let ksk_ctx = ct_ctx.clone();
@@ -646,12 +645,9 @@ mod tests {
     #[test]
     fn hybrid_key_switching() {
         let bfv_params = Arc::new(BfvParameters::new(
-            &[
-                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
-                60, 60, 60, 60, 60, 60, 60,
-            ],
+            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
             65537,
-            1 << 8,
+            1 << 15,
         ));
         let ct_ctx = bfv_params.ciphertext_poly_contexts[0].clone();
         let ksk_ctx = ct_ctx.clone();
@@ -684,7 +680,7 @@ mod tests {
         res.change_representation(Representation::Coefficient);
         izip!(Vec::<BigUint>::from(&res).iter(),).for_each(|v| {
             let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.modulus() - v).bits());
-            dbg!(diff_bits);
+            // dbg!(diff_bits);
         });
     }
 
