@@ -193,7 +193,7 @@ fn bench_poly(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("approximate_switch_crt_basis", ""), |b| {
             b.iter(|| {
                 Poly::approx_switch_crt_basis(
-                    &q_poly.coefficients,
+                    q_poly.coefficients.view(),
                     &q_context.moduli_ops,
                     q_context.degree,
                     &q_hat_inv_modq,
@@ -280,9 +280,8 @@ fn bench_poly(c: &mut Criterion) {
 
         group.bench_function(BenchmarkId::new("approximate_mod_down", ""), |b| {
             b.iter(|| {
-                Poly::approx_mod_down(
-                    &qp_poly.coefficients,
-                    &qp_context,
+                qp_poly.approx_mod_down(
+                    &q_context,
                     &p_context,
                     &p_hat_inv_modp,
                     &p_hat_modq,

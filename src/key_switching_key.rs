@@ -387,19 +387,16 @@ impl HybridKeySwitchingKey {
 
             let qj_coefficients = {
                 if (i + 1) == self.dnum {
-                    poly.coefficients
-                        .slice(s![(i * self.alpha).., ..])
-                        .to_owned()
+                    poly.coefficients.slice(s![(i * self.alpha).., ..])
                 } else {
                     poly.coefficients
                         .slice(s![(i * self.alpha)..((i + 1) * self.alpha), ..])
-                        .to_owned()
                 }
             };
             let mut parts_count = qj_coefficients.shape()[0];
 
             let mut p_whole_coefficients = Poly::approx_switch_crt_basis(
-                &qj_coefficients,
+                qj_coefficients,
                 &self.q_mod_ops_parts[i],
                 poly.context.degree,
                 &self.q_hat_inv_modq_parts[i],
@@ -475,27 +472,23 @@ impl HybridKeySwitchingKey {
             });
 
         // switch results from QP to Q
-        let c0_res = Poly::approx_mod_down(
-            &c0_out.coefficients,
-            &self.qp_ctx,
+        c0_out.approx_mod_down(
+            &self.ksk_ctx,
             &self.p_ctx,
             &self.p_hat_inv_modp,
             &self.p_hat_modq,
             &self.p_inv_modq,
         );
-        let c0_res = Poly::new(c0_res, &self.ksk_ctx, Representation::Evaluation);
 
-        let c1_res = Poly::approx_mod_down(
-            &c1_out.coefficients,
-            &self.qp_ctx,
+        c1_out.approx_mod_down(
+            &self.ksk_ctx,
             &self.p_ctx,
             &self.p_hat_inv_modp,
             &self.p_hat_modq,
             &self.p_inv_modq,
         );
-        let c1_res = Poly::new(c1_res, &self.ksk_ctx, Representation::Evaluation);
 
-        vec![c0_res, c1_res]
+        vec![c0_out, c1_out]
     }
 
     pub fn generate_c1(
