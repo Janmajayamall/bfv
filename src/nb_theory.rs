@@ -1,4 +1,4 @@
-use fhe_math::zq::Modulus;
+use crate::modulus::Modulus;
 use num_bigint_dig::{prime::probably_prime, BigUint};
 use rand::{thread_rng, Rng};
 
@@ -54,15 +54,15 @@ pub fn generate_prime(num_bits: usize, modulo: u64, upper_bound: u64) -> Option<
 // Finds 2n_th primitive root of unity in field mod p
 pub fn primitive_element(p: u64, n: usize) -> Option<u64> {
     let mut rng = thread_rng();
-    let p = Modulus::new(p).unwrap();
+    let p = Modulus::new(p);
     let m = (n as u64) * 2;
 
-    let lambda = (p.p - 1) / m;
+    let lambda = (p.modulus() - 1) / m;
 
     for _ in 0..100 {
-        let mut root = rng.gen_range(0..p.p);
-        root = p.pow(root, lambda);
-        if p.pow(root, m) == 1 && p.pow(root, m / 2) != 1 {
+        let mut root = rng.gen_range(0..p.modulus());
+        root = p.exp(root, lambda);
+        if p.exp(root, m) == 1 && p.exp(root, m / 2) != 1 {
             return Some(root);
         }
     }

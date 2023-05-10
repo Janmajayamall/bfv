@@ -29,29 +29,25 @@ fn bench_poly(c: &mut Criterion) {
         .unwrap();
 
     {
-        let params = BfvParameters::new(&[60, 60], plaintext_modulus, degree);
-        let q_ctx = params.ciphertext_poly_contexts[1].clone();
+        let bfv_params = BfvParameters::default(2, 1 << 15);
+        let q_ctx = bfv_params.ciphertext_poly_contexts[1].clone();
         let q = Poly::random(&q_ctx, &Representation::Coefficient, &mut rng);
         group.bench_function(BenchmarkId::new("scale_and_round_decryption", ""), |b| {
             b.iter(|| {
                 q.scale_and_round_decryption(
-                    &params.plaintext_modulus_op,
-                    params.max_bit_size_by2,
-                    &params.t_qlhat_inv_modql_divql_modt[1],
-                    &params.t_bqlhat_inv_modql_divql_modt[1],
-                    &params.t_qlhat_inv_modql_divql_frac[1],
-                    &params.t_bqlhat_inv_modql_divql_frac[1],
+                    &bfv_params.plaintext_modulus_op,
+                    bfv_params.max_bit_size_by2,
+                    &bfv_params.t_qlhat_inv_modql_divql_modt[1],
+                    &bfv_params.t_bqlhat_inv_modql_divql_modt[1],
+                    &bfv_params.t_qlhat_inv_modql_divql_frac[1],
+                    &bfv_params.t_bqlhat_inv_modql_divql_frac[1],
                 )
             })
         });
     }
 
     {
-        let bfv_params = BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
-            plaintext_modulus,
-            degree,
-        );
+        let bfv_params = BfvParameters::default(15, 1 << 15);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -74,11 +70,7 @@ fn bench_poly(c: &mut Criterion) {
     }
 
     {
-        let bfv_params = BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
-            plaintext_modulus,
-            degree,
-        );
+        let bfv_params = BfvParameters::default(15, 1 << 15);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -97,11 +89,7 @@ fn bench_poly(c: &mut Criterion) {
     }
 
     {
-        let bfv_params = BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
-            plaintext_modulus,
-            degree,
-        );
+        let bfv_params = BfvParameters::default(15, 1 << 15);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -130,12 +118,7 @@ fn bench_poly(c: &mut Criterion) {
     }
 
     {
-        let bfv_params = BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
-            plaintext_modulus,
-            degree,
-        );
-
+        let bfv_params = BfvParameters::default(15, 1 << 15);
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
         let mut q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
@@ -155,6 +138,29 @@ fn bench_poly(c: &mut Criterion) {
     }
 
     {
+        let bfv_params = BfvParameters::default(15, 1 << 15);
+        let q_poly = Poly::random(
+            &bfv_params.ciphertext_poly_contexts[0],
+            &Representation::Evaluation,
+            &mut rng,
+        );
+        group.bench_function(BenchmarkId::new("expand_crt_basis", ""), |b| {
+            b.iter(|| {
+                q_poly.expand_crt_basis(
+                    &bfv_params.pq_poly_contexts[0],
+                    &bfv_params.extension_poly_contexts[0],
+                    &bfv_params.ql_hat_modp[0],
+                    &bfv_params.ql_hat_inv_modql[0],
+                    &bfv_params.ql_hat_inv_modql_shoup[0],
+                    &bfv_params.ql_inv[0],
+                    &bfv_params.alphal_modp[0],
+                );
+            })
+        });
+    }
+
+    {
+        let bfv_params = BfvParameters::default(15, 1 << 15);
         let p_moduli = generate_primes_vec(
             &vec![60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
             degree,

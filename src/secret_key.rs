@@ -93,12 +93,13 @@ impl SecretKey {
     }
 
     pub fn decrypt(&self, ct: &Ciphertext) -> Plaintext {
-        debug_assert!(ct.params == self.params);
-
         // Panic on empty ciphertext
         assert!(ct.c.len() != 0);
 
+        debug_assert!(ct.params == self.params);
+
         let mut m = ct.c[0].clone();
+        debug_assert!(m.representation == Representation::Evaluation);
         let mut s = self.to_poly(ct.level);
         let mut s_carry = s.clone();
         for i in 1..ct.c.len() {

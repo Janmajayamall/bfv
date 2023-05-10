@@ -101,7 +101,7 @@ impl BfvParameters {
     ) -> BfvParameters {
         // generate primes
         let ciphertext_moduli =
-            generate_primes_vec(ciphertext_moduli_sizes, polynomial_degree, &vec![]);
+            generate_primes_vec(ciphertext_moduli_sizes, polynomial_degree, &[]);
 
         // generate extension modulus P
         // P = Q
@@ -353,7 +353,7 @@ impl BfvParameters {
             let mut tq_p_hat_inv_modp_divp_frac_lo = vec![];
             q_context.moduli.iter().for_each(|qi| {
                 p_context.moduli.iter().for_each(|pi| {
-                    let mut tq_p_hat_inv_modp = (BigUint::from_bytes_le(
+                    let tq_p_hat_inv_modp = BigUint::from_bytes_le(
                         &(&pq_dig / pi)
                             .mod_inverse(BigUintDig::from(*pi))
                             .unwrap()
@@ -361,7 +361,7 @@ impl BfvParameters {
                             .unwrap()
                             .to_bytes_le(),
                     ) * t
-                        * &q);
+                        * &q;
                     let rational = ((&tq_p_hat_inv_modp / *pi) % *qi).to_u64().unwrap();
 
                     // let mut frac = tq_p_hat_inv_modp % pi;
@@ -390,7 +390,7 @@ impl BfvParameters {
             });
 
             p_context.moduli.iter().for_each(|pi| {
-                let mut tq_p_hat_inv_modp = (BigUint::from_bytes_le(
+                let tq_p_hat_inv_modp = BigUint::from_bytes_le(
                     &(&pq_dig / pi)
                         .mod_inverse(BigUintDig::from(*pi))
                         .unwrap()
@@ -398,7 +398,7 @@ impl BfvParameters {
                         .unwrap()
                         .to_bytes_le(),
                 ) * t
-                    * &q);
+                    * &q;
 
                 let mut frac = tq_p_hat_inv_modp % pi;
                 frac <<= 127;
@@ -561,6 +561,10 @@ impl BfvParameters {
             max_bit_size_by2: b,
             matrix_reps_index_map,
         }
+    }
+
+    pub fn default(moduli_count: usize, polynomial_degree: usize) -> Self {
+        BfvParameters::new(&vec![60; moduli_count], 65537, polynomial_degree)
     }
 }
 

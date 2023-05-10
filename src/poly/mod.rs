@@ -1,6 +1,6 @@
 use crate::modulus::Modulus;
 use crypto_bigint::U192;
-use fhe_math::{rq::Context, zq::ntt::NttOperator, zq::Modulus as ModulusOld};
+use fhe_math::{zq::ntt::NttOperator, zq::Modulus as ModulusOld};
 use fhe_util::sample_vec_cbd;
 use itertools::{izip, Itertools};
 use ndarray::{azip, s, Array2, ArrayView2, Axis, IntoNdProducer};
@@ -453,12 +453,24 @@ impl Poly {
         p_inv: &[f64],
         alpha_modq: &Array2<u64>,
     ) -> Poly {
-        let p = self.fast_conv_p_over_q(
-            p_context,
-            neg_pq_hat_inv_modq,
-            neg_pq_hat_inv_modq_shoup,
-            q_inv_modp,
-        );
+        // if self is not in coefficient, then convert it
+        let p = if self.representation == Representation::Coefficient {
+            self.fast_conv_p_over_q(
+                p_context,
+                neg_pq_hat_inv_modq,
+                neg_pq_hat_inv_modq_shoup,
+                q_inv_modp,
+            )
+        } else {
+            let mut q = self.clone();
+            q.change_representation(Representation::Coefficient);
+            q.fast_conv_p_over_q(
+                p_context,
+                neg_pq_hat_inv_modq,
+                neg_pq_hat_inv_modq_shoup,
+                q_inv_modp,
+            )
+        };
 
         // switch p to q
         let q = p.switch_crt_basis(
@@ -470,35 +482,43 @@ impl Poly {
             alpha_modq,
         );
 
+        let p_size = p_context.moduli.len();
+        // output should always be in coefficient form
         let mut pq = Poly::zero(pq_context, &Representation::Coefficient);
-        izip!(
-            pq.coefficients.outer_iter_mut(),
-            p.coefficients.outer_iter()
-        )
-        .for_each(|(mut pq_row, p_row)| {
-            pq_row
-                .as_slice_mut()
-                .unwrap()
-                .copy_from_slice(p_row.as_slice().unwrap());
-        });
-        izip!(
-            pq.coefficients
-                .outer_iter_mut()
-                .skip(p_context.moduli.len()),
-            q.coefficients.outer_iter()
-        )
-        .for_each(|(mut pq_row, q_row)| {
-            pq_row
-                .as_slice_mut()
-                .unwrap()
-                .copy_from_slice(q_row.as_slice().unwrap());
-        });
+        pq.coefficients
+            .slice_mut(s![..p_size, ..])
+            .assign(&p.coefficients);
+        pq.coefficients
+            .slice_mut(s![p_size.., ..])
+            .assign(&q.coefficients);
+        // izip!(
+        //     pq.coefficients.outer_iter_mut(),
+        //     p.coefficients.outer_iter()
+        // )
+        // .for_each(|(mut pq_row, p_row)| {
+        //     pq_row
+        //         .as_slice_mut()
+        //         .unwrap()
+        //         .copy_from_slice(p_row.as_slice().unwrap());
+        // });
+        // izip!(
+        //     pq.coefficients
+        //         .outer_iter_mut()
+        //         .skip(p_context.moduli.len()),
+        //     q.coefficients.outer_iter()
+        // )
+        // .for_each(|(mut pq_row, q_row)| {
+        //     pq_row
+        //         .as_slice_mut()
+        //         .unwrap()
+        //         .copy_from_slice(q_row.as_slice().unwrap());
+        // });
 
         pq
     }
 
     pub fn expand_crt_basis(
-        &mut self,
+        &self,
         pq_context: &Arc<PolyContext>,
         p_context: &Arc<PolyContext>,
         q_hat_modp: &Array2<u64>,
@@ -507,68 +527,37 @@ impl Poly {
         q_inv: &[f64],
         alpha_modp: &Array2<u64>,
     ) -> Poly {
-        let representation_cache = self.representation.clone();
-        let mut ntt_cache: Option<Array2<u64>> = None;
-
-        if self.representation == Representation::Evaluation {
-            // Save coefficients to avoid ntt operations later
-            ntt_cache = Some(self.coefficients.clone());
-            self.change_representation(Representation::Coefficient);
-        }
-
-        let mut p = self.switch_crt_basis(
-            p_context,
-            q_hat_modp,
-            q_hat_inv_modq,
-            q_hat_inv_modq_shoup,
-            q_inv,
-            alpha_modp,
-        );
-        p.change_representation(representation_cache.clone());
-
-        let p_moduli_len = p_context.moduli.len();
-        let mut pq = Poly::zero(pq_context, &representation_cache);
-        azip!(
-            pq.coefficients
-                .slice_mut(s![..p_moduli_len, ..])
-                .outer_iter_mut(),
-            p.coefficients.outer_iter()
-        )
-        .for_each(|mut pq_row, p_row| {
-            pq_row
-                .as_slice_mut()
-                .unwrap()
-                .copy_from_slice(p_row.as_slice().unwrap());
-        });
-
-        if let Some(ntt_cache) = ntt_cache {
-            azip!(
-                pq.coefficients
-                    .slice_mut(s![p_moduli_len.., ..])
-                    .outer_iter_mut(),
-                ntt_cache.outer_iter()
+        let mut p = if self.representation == Representation::Coefficient {
+            self.switch_crt_basis(
+                p_context,
+                q_hat_modp,
+                q_hat_inv_modq,
+                q_hat_inv_modq_shoup,
+                q_inv,
+                alpha_modp,
             )
-            .for_each(|mut pq_row, q_row| {
-                pq_row
-                    .as_slice_mut()
-                    .unwrap()
-                    .copy_from_slice(q_row.as_slice().unwrap());
-            });
         } else {
-            self.change_representation(representation_cache);
-            azip!(
-                pq.coefficients
-                    .slice_mut(s![p_moduli_len.., ..])
-                    .outer_iter_mut(),
-                self.coefficients.outer_iter()
+            let mut q = self.clone();
+            q.change_representation(Representation::Coefficient);
+            q.switch_crt_basis(
+                p_context,
+                q_hat_modp,
+                q_hat_inv_modq,
+                q_hat_inv_modq_shoup,
+                q_inv,
+                alpha_modp,
             )
-            .for_each(|mut pq_row, q_row| {
-                pq_row
-                    .as_slice_mut()
-                    .unwrap()
-                    .copy_from_slice(q_row.as_slice().unwrap());
-            });
-        }
+        };
+        p.change_representation(self.representation.clone());
+
+        let p_size = p_context.moduli.len();
+        let mut pq = Poly::zero(pq_context, &self.representation);
+        pq.coefficients
+            .slice_mut(s![..p_size, ..])
+            .assign(&p.coefficients);
+        pq.coefficients
+            .slice_mut(s![p_size.., ..])
+            .assign(&self.coefficients);
 
         pq
     }

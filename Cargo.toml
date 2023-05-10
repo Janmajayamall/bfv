@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.release]
 
 [dependencies]
 num-bigint-dig = {version = "0.8.2", features = ["prime"]}
@@ -19,7 +20,8 @@ rand_chacha = "0.3.1"
 rayon = "1.7.0"
 
 [dev-dependencies]
-criterion = "0.3"
+pprof = { version = "0.11.0", features = ["criterion", "flamegraph", "frame-pointer"]}
+criterion = "0.4"
 
 [[bench]]
 name = "modulus"
@@ -27,6 +29,10 @@ harness = false
 
 [[bench]]
 name = "poly"
+harness = false
+
+[[bench]]
+name = "bfv"
 harness = false
 
 [features]
