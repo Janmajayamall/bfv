@@ -2,7 +2,7 @@ use crate::modulus::Modulus;
 use crate::{
     nb_theory::generate_prime,
     poly::{Poly, PolyContext, Representation},
-    SecretKey,
+    secret_key::SecretKey,
 };
 use crypto_bigint::rand_core::CryptoRngCore;
 use itertools::{izip, Itertools};
@@ -460,6 +460,7 @@ impl HybridKeySwitchingKey {
         // perform key switching
         let mut c0_out = &poly_parts_qp[0] * &self.c0s[0];
         poly_parts_qp[0] *= &self.c1s[0];
+        // FIXME: I find this clone unnecessary
         let mut c1_out = poly_parts_qp[0].clone();
 
         izip!(poly_parts_qp.iter_mut(), self.c0s.iter(), self.c1s.iter())
@@ -592,7 +593,7 @@ impl HybridKeySwitchingKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::BfvParameters;
+    use crate::parameters::BfvParameters;
     use num_bigint::BigUint;
     use rand::thread_rng;
     use rayon::prelude::{IntoParallelIterator, ParallelBridge, ParallelIterator};

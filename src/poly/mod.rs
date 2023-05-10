@@ -759,13 +759,13 @@ impl MulAssign<&Poly> for Poly {
         assert!(self.representation == rhs.representation);
         assert!(self.representation == Representation::Evaluation);
 
-        izip!(
-            self.coefficients.outer_iter_mut(),
-            rhs.coefficients.outer_iter(),
-            self.context.moduli_ops.iter()
+        azip!(
+            self.coefficients.outer_iter_mut().into_producer(),
+            rhs.coefficients.outer_iter().into_producer(),
+            self.context.moduli_ops.into_producer()
         )
-        .for_each(|(mut p, p2, qi)| {
-            qi.mul_mod_fast_vec(p.as_slice_mut().unwrap(), p2.as_slice().unwrap());
+        .for_each(|mut p, p2, modqi| {
+            modqi.mul_mod_fast_vec(p.as_slice_mut().unwrap(), p2.as_slice().unwrap());
         });
     }
 }
@@ -869,6 +869,8 @@ impl From<&Poly> for Vec<BigUint> {
 
 //TODO: write tests for poly
 mod tests {
+    use super::*;
+    use crate::{nb_theory::generate_primes_vec, parameters::BfvParameters};
     use num_bigint::ToBigInt;
     use num_bigint_dig::UniformBigUint;
     use num_traits::{FromPrimitive, Zero};
@@ -876,9 +878,6 @@ mod tests {
         distributions::{uniform::UniformSampler, Uniform},
         thread_rng, Rng,
     };
-
-    use super::*;
-    use crate::{nb_theory::generate_primes_vec, BfvParameters};
 
     #[test]
     // FIXME: fails in debug mode. Check fn to see why.

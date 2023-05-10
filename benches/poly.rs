@@ -1,9 +1,7 @@
-use std::time::Duration;
-
 use bfv::{
     nb_theory::generate_primes_vec,
+    parameters::BfvParameters,
     poly::{Poly, PolyContext, Representation},
-    BfvParameters,
 };
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use itertools::izip;
@@ -13,6 +11,7 @@ use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{FromPrimitive, ToPrimitive};
 use rand::thread_rng;
 use std::sync::Arc;
+use std::time::Duration;
 
 fn bench_poly(c: &mut Criterion) {
     let mut group = c.benchmark_group("poly");
