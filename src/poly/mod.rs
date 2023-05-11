@@ -401,14 +401,29 @@ impl Poly {
         .par_for_each(|mut p_rests, q_rests| {
             let mut xi_q_hat_inv_modq = vec![];
             let mut nu = 0.5f64;
-            izip!(
-                q_rests.iter(),
-                q_hat_inv_modq.iter(),
-                q_hat_inv_modq_shoup.iter(),
-                q_inv.iter(),
-                self.context.moduli_ops.iter()
+
+            // unsafe {
+            //     for i in 0..q_rests.len() {
+            //         let xi = q_rests.get(i).unwrap();
+            //         let qi_hat_inv = q_hat_inv_modq.get_unchecked(i);
+            //         let qi_hat_inv_shoup = q_hat_inv_modq_shoup.get_unchecked(i);
+            //         let modqi = self.context.moduli_ops.get_unchecked(i);
+
+            //         let tmp = modqi.mul_mod_shoup(*xi, *qi_hat_inv, *qi_hat_inv_shoup);
+            //         xi_q_hat_inv_modq.push(tmp);
+
+            //         let qi_inv = q_inv.get_unchecked(i);
+            //         nu += tmp as f64 * qi_inv;
+            //     }
+            // }
+            azip!(
+                q_rests.into_producer(),
+                q_hat_inv_modq.into_producer(),
+                q_hat_inv_modq_shoup.into_producer(),
+                q_inv.into_producer(),
+                self.context.moduli_ops.into_producer()
             )
-            .for_each(|(xi, qi_hat_inv, qi_hat_inv_shoup, q_inv, modq)| {
+            .for_each(|xi, qi_hat_inv, qi_hat_inv_shoup, q_inv, modq| {
                 // TODO: replacing mul_mod_fast with mul_mod_shoup only increases perf by 2.8% or so. I think treasure lies somewhere else
                 let tmp = modq.mul_mod_shoup(*xi, *qi_hat_inv, *qi_hat_inv_shoup);
                 xi_q_hat_inv_modq.push(tmp);
@@ -418,22 +433,47 @@ impl Poly {
 
             let alpha = alpha_modp.slice(s![nu as usize, ..]);
 
-            izip!(
-                p_rests.iter_mut(),
-                q_hat_modp.outer_iter(),
-                p_context.moduli_ops.iter(),
-                alpha.iter(),
+            // unsafe {
+            //     for j in 0..p_rests.len() {
+            //         let pxj = p_rests.get_mut(j).unwrap();
+            //         let modpj = p_context.moduli_ops.get_unchecked(j);
+            //         for i in 0..xi_q_hat_inv_modq.len() {
+            //             *pxj = modpj.add_mod_fast(
+            //                 *pxj,
+            //                 modpj.mul_mod_fast(
+            //                     *xi_q_hat_inv_modq.get_unchecked(i),
+            //                     *q_hat_modp.get((j, i)).unwrap(),
+            //                 ),
+            //             );
+            //         }
+            //         *pxj = modpj.sub_mod_fast(*pxj, *alpha_modp.get((nu as usize, j)).unwrap());
+            //     }
+            // }
+
+            azip!(
+                p_rests.into_producer(),
+                q_hat_modp.outer_iter().into_producer(),
+                alpha.into_producer(),
+                p_context.moduli_ops.into_producer()
             )
-            .for_each(|(pxj, q_hat_modpj, modpj, alpha_modpj)| {
+            .for_each(|pxj, q_hat_modpj, alpha_modpj, modpj| {
+                let mut tmp = 0u128;
                 izip!(xi_q_hat_inv_modq.iter(), q_hat_modpj.iter()).for_each(
                     |(xi_q_hat_inv, qi_hat_modpj)| {
                         // TODO: can FMA using HEXL
-                        *pxj = modpj
-                            .add_mod_fast(*pxj, modpj.mul_mod_fast(*xi_q_hat_inv, *qi_hat_modpj));
+                        tmp += (*xi_q_hat_inv as u128 * *qi_hat_modpj as u128);
+                        // *pxj = modpj.add_mod_fast(
+                        //     *pxj,
+                        //     modpj.mul_mod_shoup(*xi_q_hat_inv, *qi_hat_modpj, *qi_hat_modpj),
+                        // );
                     },
                 );
 
-                *pxj = modpj.sub_mod_fast(*pxj, *alpha_modpj);
+                tmp -= *alpha_modpj as u128;
+
+                *pxj = modpj.barret_reduction_u128(tmp);
+
+                // *pxj = modpj.sub_mod_fast(*pxj, *alpha_modpj);
             });
         });
 

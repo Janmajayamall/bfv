@@ -9,6 +9,7 @@ use ndarray::Array2;
 use num_bigint::BigUint;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{FromPrimitive, ToPrimitive};
+use pprof::criterion::{Output, PProfProfiler};
 use rand::thread_rng;
 use std::sync::Arc;
 use std::time::Duration;
@@ -70,7 +71,7 @@ fn bench_poly(c: &mut Criterion) {
     }
 
     {
-        let bfv_params = BfvParameters::default(15, 1 << 15);
+        let bfv_params = BfvParameters::default(15, 1 << 3);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -286,5 +287,9 @@ fn bench_poly(c: &mut Criterion) {
     }
 }
 
-criterion_group!(poly, bench_poly);
+criterion_group!(
+    name = poly;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = bench_poly
+);
 criterion_main!(poly);
