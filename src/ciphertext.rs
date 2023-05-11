@@ -19,7 +19,7 @@ impl Ciphertext {
 
         let level = self.level;
 
-        let mut now = std::time::Instant::now();
+        // let mut now = std::time::Instant::now();
         let mut c00 = self.c[0].expand_crt_basis(
             &self.params.pq_poly_contexts[level],
             &self.params.extension_poly_contexts[level],
@@ -38,9 +38,9 @@ impl Ciphertext {
             &self.params.ql_inv[level],
             &self.params.alphal_modp[level],
         );
-        println!("Extend1 {:?}", now.elapsed());
+        // println!("Extend1 {:?}", now.elapsed());
 
-        now = std::time::Instant::now();
+        // now = std::time::Instant::now();
         let mut c10 = rhs.c[0].fast_expand_crt_basis_p_over_q(
             &self.params.extension_poly_contexts[level],
             &self.params.pq_poly_contexts[level],
@@ -67,9 +67,9 @@ impl Ciphertext {
         );
         c10.change_representation(Representation::Evaluation);
         c11.change_representation(Representation::Evaluation);
-        println!("Extend2 {:?}", now.elapsed());
+        // println!("Extend2 {:?}", now.elapsed());
 
-        now = std::time::Instant::now();
+        // now = std::time::Instant::now();
         // tensor
         // c00 * c10
         let c_r0 = &c00 * &c10;
@@ -81,10 +81,10 @@ impl Ciphertext {
 
         // c01 * c11
         c01 *= &c11;
-        println!("Tensor {:?}", now.elapsed());
+        // println!("Tensor {:?}", now.elapsed());
 
         // Scale down
-        now = std::time::Instant::now();
+        // now = std::time::Instant::now();
         let mut c = vec![c_r0, c00, c01];
         let c = c
             .iter_mut()
@@ -102,7 +102,7 @@ impl Ciphertext {
                 p
             })
             .collect_vec();
-        println!("Scale Down {:?}", now.elapsed());
+        // println!("Scale Down {:?}", now.elapsed());
 
         Ciphertext {
             c,

@@ -315,16 +315,12 @@ impl Poly {
 
                     let mut s = frac;
                     for j in 0..input.len() {
-                        s += modo.mul_mod_fast(
-                            *input.get(j).unwrap(),
-                            *to_s_hat_inv_mods_divs_modo.get((i, j)).unwrap(),
-                        ) as u128;
+                        s += *input.get(j).unwrap() as u128
+                            * *to_s_hat_inv_mods_divs_modo.get((i, j)).unwrap() as u128;
                     }
 
-                    s += modo.mul_mod_fast(
-                        *pq_rests.get(output_offset + i).unwrap(),
-                        *to_s_hat_inv_mods_divs_modo.get((i, input_size)).unwrap(),
-                    ) as u128;
+                    s += *pq_rests.get(output_offset + i).unwrap() as u128
+                        * *to_s_hat_inv_mods_divs_modo.get((i, input_size)).unwrap() as u128;
 
                     let oxi = o_rests.get_mut(i).unwrap();
                     *oxi = modo.barret_reduction_u128(s);
