@@ -232,7 +232,6 @@ impl BfvParameters {
 
                 let mut neg_pq_hat_inv_modq = vec![];
                 let mut neg_pq_hat_inv_modq_shoup = vec![];
-                let mut qi_inv_modp = vec![];
 
                 izip!(q_context.moduli_ops.iter()).for_each(|modqi| {
                     let qi = modqi.modulus();
@@ -249,19 +248,21 @@ impl BfvParameters {
                         .unwrap();
                     neg_pq_hat_inv_modq.push(tmp);
                     neg_pq_hat_inv_modq_shoup.push(modqi.compute_shoup(tmp));
+                });
 
-                    p_context
-                        .moduli_ops
-                        .iter()
-                        .for_each(|pi| qi_inv_modp.push(pi.inv(qi % pi.modulus())));
+                let mut q_inv_modp = vec![];
+                p_context.moduli_ops.iter().for_each(|modpj| {
+                    q_context.moduli.iter().for_each(|qi| {
+                        q_inv_modp.push(modpj.inv(*qi % modpj.modulus()));
+                    });
                 });
 
                 neg_pql_hat_inv_modql.push(neg_pq_hat_inv_modq);
                 neg_pql_hat_inv_modql_shoup.push(neg_pq_hat_inv_modq_shoup);
                 ql_inv_modp.push(
                     Array2::from_shape_vec(
-                        (q_context.moduli.len(), p_context.moduli.len()),
-                        qi_inv_modp,
+                        (p_context.moduli.len(), q_context.moduli.len()),
+                        q_inv_modp,
                     )
                     .unwrap(),
                 );

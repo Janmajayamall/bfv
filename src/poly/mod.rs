@@ -355,30 +355,72 @@ impl Poly {
             self.coefficients.axis_iter(Axis(1)).into_producer()
         )
         .par_for_each(|mut p_rests, q_rests| {
-            izip!(
+            let xiv = izip!(
                 q_rests.iter(),
-                q_inv_modp.outer_iter(),
                 neg_pq_hat_inv_modq.iter(),
                 neg_pq_hat_inv_modq_shoup.iter(),
                 self.context.moduli_ops.iter()
             )
-            .for_each(
-                |(xi, qi_inv_modp, neg_pqi_hat_inv, neg_pq_hat_inv_shoup, modqi)| {
-                    // TODO: replacing mul_mod_fast with mul_mod_shoup only increases perf by 4%
-                    let xi_v = modqi.mul_mod_shoup(*xi, *neg_pqi_hat_inv, *neg_pq_hat_inv_shoup);
-                    izip!(
-                        p_rests.iter_mut(),
-                        qi_inv_modp.iter(),
-                        p_context.moduli_ops.iter()
-                    )
-                    .for_each(|(pxi, qi_inv, modpi)| {
-                        let tmp = modpi.mul_mod_fast(xi_v, *qi_inv);
-                        *pxi = modpi.add_mod_fast(*pxi, tmp);
-                    })
-                },
-            );
+            .map(|(xi, neg_pqi_hat_inv, neg_pq_hat_inv_shoup, modqi)| {
+                modqi.mul_mod_shoup(*xi, *neg_pqi_hat_inv, *neg_pq_hat_inv_shoup)
+            })
+            .collect_vec();
+
+            izip!(
+                p_rests.iter_mut(),
+                p_context.moduli_ops.iter(),
+                q_inv_modp.outer_iter()
+            )
+            .for_each(|(pxi, modpj, q_inv_modpj)| {
+                let mut tmp = 0u128;
+                izip!(xiv.iter(), q_inv_modpj.iter()).for_each(|(v, qi_inv_modpj)| {
+                    tmp += *v as u128 * *qi_inv_modpj as u128;
+                });
+                *pxi = modpj.barret_reduction_u128(tmp);
+            })
         });
+
         p
+
+        // Note: Below is the old code for the function and I have kept it around because it baffles me!
+        // This version is 200% times slower than the current version (above) and I am not sure why?
+        // The current version maps multiplication of q_rests with neg_pqi_hat_inv for each modqi into
+        // a local vector and then performs calculation per p_rests, that is p_rests is outer loop and local vector is inner
+        // loop. What baffles me is that current version somewhat does a bit extra amount of work than
+        // this version, and is still a lot faster! I suspect the reason for this is cache locality. Hence,
+        // I wanted to keep this code around and check whether I can someday resolve this issue and use this
+        // version!
+        // let mut p = Poly::zero(p_context, &Representation::Coefficient);
+
+        // azip!(
+        //     p.coefficients.axis_iter_mut(Axis(1)).into_producer(),
+        //     self.coefficients.axis_iter(Axis(1)).into_producer()
+        // )
+        // .par_for_each(|mut p_rests, q_rests| {
+        //     izip!(
+        //         q_rests.iter(),
+        //         q_inv_modp.outer_iter(),
+        //         neg_pq_hat_inv_modq.iter(),
+        //         neg_pq_hat_inv_modq_shoup.iter(),
+        //         self.context.moduli_ops.iter()
+        //     )
+        //     .for_each(
+        //         |(xi, qi_inv_modp, neg_pqi_hat_inv, neg_pq_hat_inv_shoup, modqi)| {
+        //             // TODO: replacing mul_mod_fast with mul_mod_shoup only increases perf by 4%
+        //             let xi_v = modqi.mul_mod_shoup(*xi, *neg_pqi_hat_inv, *neg_pq_hat_inv_shoup);
+        //             izip!(
+        //                 p_rests.iter_mut(),
+        //                 qi_inv_modp.iter(),
+        //                 p_context.moduli_ops.iter()
+        //             )
+        //             .for_each(|(pxi, qi_inv, modpi)| {
+        //                 let tmp = modpi.mul_mod_fast(xi_v, *qi_inv);
+        //                 *pxi = modpi.add_mod_fast(*pxi, tmp);
+        //             })
+        //         },
+        //     );
+        // });
+        // p
     }
 
     pub fn switch_crt_basis(
@@ -402,20 +444,6 @@ impl Poly {
             let mut xi_q_hat_inv_modq = vec![];
             let mut nu = 0.5f64;
 
-            // unsafe {
-            //     for i in 0..q_rests.len() {
-            //         let xi = q_rests.get(i).unwrap();
-            //         let qi_hat_inv = q_hat_inv_modq.get_unchecked(i);
-            //         let qi_hat_inv_shoup = q_hat_inv_modq_shoup.get_unchecked(i);
-            //         let modqi = self.context.moduli_ops.get_unchecked(i);
-
-            //         let tmp = modqi.mul_mod_shoup(*xi, *qi_hat_inv, *qi_hat_inv_shoup);
-            //         xi_q_hat_inv_modq.push(tmp);
-
-            //         let qi_inv = q_inv.get_unchecked(i);
-            //         nu += tmp as f64 * qi_inv;
-            //     }
-            // }
             azip!(
                 q_rests.into_producer(),
                 q_hat_inv_modq.into_producer(),
@@ -433,23 +461,6 @@ impl Poly {
 
             let alpha = alpha_modp.slice(s![nu as usize, ..]);
 
-            // unsafe {
-            //     for j in 0..p_rests.len() {
-            //         let pxj = p_rests.get_mut(j).unwrap();
-            //         let modpj = p_context.moduli_ops.get_unchecked(j);
-            //         for i in 0..xi_q_hat_inv_modq.len() {
-            //             *pxj = modpj.add_mod_fast(
-            //                 *pxj,
-            //                 modpj.mul_mod_fast(
-            //                     *xi_q_hat_inv_modq.get_unchecked(i),
-            //                     *q_hat_modp.get((j, i)).unwrap(),
-            //                 ),
-            //             );
-            //         }
-            //         *pxj = modpj.sub_mod_fast(*pxj, *alpha_modp.get((nu as usize, j)).unwrap());
-            //     }
-            // }
-
             azip!(
                 p_rests.into_producer(),
                 q_hat_modp.outer_iter().into_producer(),
@@ -462,18 +473,10 @@ impl Poly {
                     |(xi_q_hat_inv, qi_hat_modpj)| {
                         // TODO: can FMA using HEXL
                         tmp += (*xi_q_hat_inv as u128 * *qi_hat_modpj as u128);
-                        // *pxj = modpj.add_mod_fast(
-                        //     *pxj,
-                        //     modpj.mul_mod_shoup(*xi_q_hat_inv, *qi_hat_modpj, *qi_hat_modpj),
-                        // );
                     },
                 );
-
                 tmp -= *alpha_modpj as u128;
-
                 *pxj = modpj.barret_reduction_u128(tmp);
-
-                // *pxj = modpj.sub_mod_fast(*pxj, *alpha_modpj);
             });
         });
 

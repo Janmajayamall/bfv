@@ -410,6 +410,7 @@ mod tests {
     use crate::nb_theory::generate_prime;
     use itertools::Itertools;
     use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
+    use num_traits::Zero;
     use rand::{thread_rng, Rng};
 
     #[test]
@@ -596,5 +597,31 @@ mod tests {
                 })
                 .collect_vec()
         );
+    }
+
+    #[test]
+    fn test_perf_fma() {
+        let size = 1 << 11;
+        let mut rng = thread_rng();
+        let prime = generate_prime(59, 16, 1 << 59).unwrap();
+        let modulus = Modulus::new(prime);
+        let a = modulus.random_vec(size, &mut rng);
+        let b = modulus.random_vec(size, &mut rng);
+
+        // Note: this method overflows at addition if log(size) > 128 - log(prime)*2
+        let now = std::time::Instant::now();
+        let mut r_u128 = 0u128;
+        izip!(a.iter(), b.iter()).for_each(|(v, v1)| {
+            r_u128 += *v as u128 * *v1 as u128;
+        });
+        let r = modulus.barret_reduction_u128(r_u128);
+        println!("time u128: {r} {:?}", now.elapsed());
+
+        let now = std::time::Instant::now();
+        let mut r = 0u64;
+        izip!(a.iter(), b.iter()).for_each(|(v, v1)| {
+            r = modulus.add_mod_fast(r, modulus.mul_mod_fast(*v, *v1));
+        });
+        println!("time: {r} {:?}", now.elapsed());
     }
 }

@@ -28,7 +28,7 @@ fn bench_poly(c: &mut Criterion) {
         .num_threads(1)
         .build_global()
         .unwrap();
-
+//TODO: add support for multiple polynomial degrees
     {
         let bfv_params = BfvParameters::default(2, 1 << 15);
         let q_ctx = bfv_params.ciphertext_poly_contexts[1].clone();
@@ -71,7 +71,7 @@ fn bench_poly(c: &mut Criterion) {
     }
 
     {
-        let bfv_params = BfvParameters::default(15, 1 << 3);
+        let bfv_params = BfvParameters::default(15, 1 << 15);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
