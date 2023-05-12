@@ -72,7 +72,7 @@ impl Ciphertext {
         // now = std::time::Instant::now();
         // tensor
         // c00 * c10
-        let c_r0 = &c00 * &c10;
+        let mut c_r0 = &c00 * &c10;
 
         // c00 * c11 + c01 * c10
         c00 *= &c11;
@@ -85,23 +85,25 @@ impl Ciphertext {
 
         // Scale down
         // now = std::time::Instant::now();
-        let mut c = vec![c_r0, c00, c01];
-        let c = c
+        c_r0.change_representation(Representation::Coefficient);
+        c00.change_representation(Representation::Coefficient);
+        c01.change_representation(Representation::Coefficient);
+        let mut c = vec![c_r0, c00, c01]
             .iter_mut()
             .map(|p| {
-                p.change_representation(Representation::Coefficient);
-                let mut p = p.scale_and_round(
+                p.scale_and_round(
                     &self.params.ciphertext_poly_contexts[level],
                     &self.params.extension_poly_contexts[level],
                     &self.params.ciphertext_poly_contexts[level],
                     &self.params.tql_p_hat_inv_modp_divp_modql[level],
                     &self.params.tql_p_hat_inv_modp_divp_frac_hi[level],
                     &self.params.tql_p_hat_inv_modp_divp_frac_lo[level],
-                );
-                p.change_representation(Representation::Evaluation);
-                p
+                )
             })
             .collect_vec();
+        c.iter_mut().for_each(|p| {
+            p.change_representation(Representation::Evaluation);
+        });
         // println!("Scale Down {:?}", now.elapsed());
 
         Ciphertext {
