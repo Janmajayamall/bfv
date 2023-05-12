@@ -28,7 +28,7 @@ fn bench_poly(c: &mut Criterion) {
         .num_threads(1)
         .build_global()
         .unwrap();
-//TODO: add support for multiple polynomial degrees
+    //TODO: add support for multiple polynomial degrees
     {
         let bfv_params = BfvParameters::default(2, 1 << 15);
         let q_ctx = bfv_params.ciphertext_poly_contexts[1].clone();
@@ -83,6 +83,7 @@ fn bench_poly(c: &mut Criterion) {
                     &p_context,
                     &bfv_params.neg_pql_hat_inv_modql[0],
                     &bfv_params.neg_pql_hat_inv_modql_shoup[0],
+                    &bfv_params.ql_inv[0],
                     &bfv_params.ql_inv_modp[0],
                 );
             })
@@ -106,6 +107,7 @@ fn bench_poly(c: &mut Criterion) {
                         &pq_context,
                         &bfv_params.neg_pql_hat_inv_modql[0],
                         &bfv_params.neg_pql_hat_inv_modql_shoup[0],
+                        &bfv_params.ql_inv[0],
                         &bfv_params.ql_inv_modp[0],
                         &bfv_params.pl_hat_modq[0],
                         &bfv_params.pl_hat_inv_modpl[0],

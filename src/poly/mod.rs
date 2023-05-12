@@ -334,12 +334,18 @@ impl Poly {
 
     /// Given a polynomial in context with moduli Q returns a polynomial in context with moduli P by calculating [round(P/Q([poly]_Q))]_P
     ///
-    /// Appendix E of 2021/204 for reference.
+    /// This function additionally estimates the value of $u and subtracts it from summation of each $p_{j}. Hence, the noise accumulation
+    /// due to this function is reduced to 0, otherwise $noise = \norm u_{\inf} = \frac{k}{2}$ where $k is no. of moduli in $Q. This is important
+    /// because this function is called 2 times in ciphertext multiplication and directly impacts noise grwoth. However, as you did expect,
+    /// this introduces some performance overhead. For ex, for loq=900 and n=2^15 performance regresses by 10-12%.
+    ///
+    /// Check Appendix E of 2021/204 for reference.
     pub fn fast_conv_p_over_q(
         &self,
         p_context: &Arc<PolyContext>,
         neg_pq_hat_inv_modq: &[u64],
         neg_pq_hat_inv_modq_shoup: &[u64],
+        q_inv: &[f64],
         q_inv_modp: &Array2<u64>,
     ) -> Poly {
         debug_assert!(self.representation == Representation::Coefficient);
@@ -351,15 +357,21 @@ impl Poly {
             self.coefficients.axis_iter(Axis(1)).into_producer()
         )
         .par_for_each(|mut p_rests, q_rests| {
+            let mut nu = 0.5;
             let xiv = izip!(
                 q_rests.iter(),
                 neg_pq_hat_inv_modq.iter(),
                 neg_pq_hat_inv_modq_shoup.iter(),
+                q_inv.iter(),
                 self.context.moduli_ops.iter()
             )
-            .map(|(xi, neg_pqi_hat_inv, neg_pq_hat_inv_shoup, modqi)| {
-                modqi.mul_mod_shoup(*xi, *neg_pqi_hat_inv, *neg_pq_hat_inv_shoup)
-            })
+            .map(
+                |(xi, neg_pqi_hat_inv, neg_pq_hat_inv_shoup, qi_inv, modqi)| {
+                    let tmp = modqi.mul_mod_shoup(*xi, *neg_pqi_hat_inv, *neg_pq_hat_inv_shoup);
+                    nu += tmp as f64 * qi_inv;
+                    tmp
+                },
+            )
             .collect_vec();
 
             izip!(
@@ -372,6 +384,7 @@ impl Poly {
                 izip!(xiv.iter(), q_inv_modpj.iter()).for_each(|(v, qi_inv_modpj)| {
                     tmp += *v as u128 * *qi_inv_modpj as u128;
                 });
+                tmp -= nu as u128;
                 *pxi = modpj.barret_reduction_u128(tmp);
             })
         });
@@ -485,6 +498,7 @@ impl Poly {
         pq_context: &Arc<PolyContext>,
         neg_pq_hat_inv_modq: &[u64],
         neg_pq_hat_inv_modq_shoup: &[u64],
+        q_inv: &[f64],
         q_inv_modp: &Array2<u64>,
         p_hat_modq: &Array2<u64>,
         p_hat_inv_modp: &[u64],
@@ -498,6 +512,7 @@ impl Poly {
                 p_context,
                 neg_pq_hat_inv_modq,
                 neg_pq_hat_inv_modq_shoup,
+                q_inv,
                 q_inv_modp,
             )
         } else {
@@ -507,6 +522,7 @@ impl Poly {
                 p_context,
                 neg_pq_hat_inv_modq,
                 neg_pq_hat_inv_modq_shoup,
+                q_inv,
                 q_inv_modp,
             )
         };
@@ -987,6 +1003,7 @@ mod tests {
             &p_context,
             &bfv_params.neg_pql_hat_inv_modql[0],
             &bfv_params.neg_pql_hat_inv_modql_shoup[0],
+            &bfv_params.ql_inv[0],
             &bfv_params.ql_inv_modp[0],
         );
         println!("time: {:?}", now.elapsed());
@@ -1075,6 +1092,7 @@ mod tests {
             &pq_context,
             &bfv_params.neg_pql_hat_inv_modql[0],
             &bfv_params.neg_pql_hat_inv_modql_shoup[0],
+            &bfv_params.ql_inv[0],
             &bfv_params.ql_inv_modp[0],
             &bfv_params.pl_hat_modq[0],
             &bfv_params.pl_hat_inv_modpl[0],
