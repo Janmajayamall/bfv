@@ -19,7 +19,7 @@ fn bench_bfv(c: &mut Criterion) {
         .unwrap();
 
     for degree in [1 << 15] {
-        for m_size in [15] {
+        for m_size in [13, 15] {
             let mut rng = thread_rng();
             let bfv_params = Arc::new(BfvParameters::default(m_size, degree));
             let logq = bfv_params.ciphertext_poly_contexts[0].modulus().bits();
