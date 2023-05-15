@@ -366,6 +366,7 @@ dependencies = [
 [[package]]
 name = "fhe-math"
 version = "0.1.0-beta.4"
+source = "git+https://github.com/Janmajayamall/fhe.rs?branch=compare#716b015c679811afd823645a51bdb044b501c22f"
 dependencies = [
  "crypto-bigint",
  "fhe-traits",
@@ -386,6 +387,7 @@ dependencies = [
 [[package]]
 name = "fhe-traits"
 version = "0.1.0-beta.4"
+source = "git+https://github.com/Janmajayamall/fhe.rs?branch=compare#716b015c679811afd823645a51bdb044b501c22f"
 dependencies = [
  "rand",
 ]
@@ -393,6 +395,7 @@ dependencies = [
 [[package]]
 name = "fhe-util"
 version = "0.1.0-beta.4"
+source = "git+https://github.com/Janmajayamall/fhe.rs?branch=compare#716b015c679811afd823645a51bdb044b501c22f"
 dependencies = [
  "itertools",
  "num-bigint-dig",
