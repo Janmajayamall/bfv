@@ -13,10 +13,10 @@ fn bench_bfv(c: &mut Criterion) {
     let mut group = c.benchmark_group("bfv");
     group.sample_size(10);
 
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
-        .build_global()
-        .unwrap();
+    // rayon::ThreadPoolBuilder::new()
+    //     .num_threads(1)
+    //     .build_global()
+    //     .unwrap();
 
     for degree in [1 << 15] {
         for m_size in [13, 15] {

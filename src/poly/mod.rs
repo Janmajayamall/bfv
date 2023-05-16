@@ -206,6 +206,31 @@ impl Poly {
         }
     }
 
+    /// Given polynomial in Q(X) returns Q(X^i) for substitution element i.
+    /// In Evaluation form i must an odd integer not a multiple of 2*degree.
+    /// In Coefficient form i must be an integer not a multiple of 2*degree.
+    pub fn substitute(&self, pow: usize) {
+        let mut p = Poly::zero(&self.context, &self.representation);
+
+        if self.representation == Representation::Coefficient {
+            let mut exponent = 0;
+            let mask = (self.context.degree * 2) - 1;
+            for j in 0..self.context.degree {
+                p.coefficients
+                    .slice_mut(s![.., j])
+                    .as_slice_mut()
+                    .unwrap()
+                    .copy_from_slice(
+                        self.coefficients
+                            .slice(s![.., mask & exponent])
+                            .as_slice()
+                            .unwrap(),
+                    );
+                exponent += pow;
+            }
+        }
+    }
+
     pub fn scale_and_round_decryption(
         &self,
         t: &Modulus,
