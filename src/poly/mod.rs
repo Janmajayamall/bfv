@@ -117,6 +117,7 @@ impl PolyContext {
     }
 }
 
+#[derive(Debug)]
 pub struct Substitution {
     exponent: usize,
     power_bitrev: Box<[usize]>,
@@ -126,7 +127,7 @@ pub struct Substitution {
 impl Substitution {
     /// Computes substitution map for polynomial degree
     ///
-    /// expoenent must be an odd integer not a multiple of 2 * degree.
+    /// exponent must be an odd integer not a multiple of 2 * degree.
     pub fn new(exponent: usize, degree: usize) -> Substitution {
         assert!(exponent & 1 == 1);
         let exponent = exponent % (2 * degree);
@@ -252,20 +253,18 @@ impl Poly {
         debug_assert!(subs.exponent % (self.context.degree * 2) != 0);
         debug_assert!(self.context.degree == subs.degree);
         let mut p = Poly::zero(&self.context, &self.representation);
-
         if self.representation == Representation::Evaluation {
             debug_assert!(subs.exponent & 1 == 1);
-
             azip!(
-                self.context.bit_reverse.into_producer(),
-                subs.power_bitrev.into_producer()
+                p.coefficients.outer_iter_mut(),
+                self.coefficients.outer_iter()
             )
-            .for_each(|br, pr| {
-                p.coefficients
-                    .slice_mut(s![.., *br])
-                    .as_slice_mut()
-                    .unwrap()
-                    .copy_from_slice(self.coefficients.slice(s![.., *pr]).as_slice().unwrap());
+            .par_for_each(|mut pv, qv| {
+                izip!(self.context.bit_reverse.iter(), subs.power_bitrev.iter()).for_each(
+                    |(br, pr)| {
+                        pv[*br] = qv[*pr];
+                    },
+                );
             });
         } else if self.representation == Representation::Coefficient {
             let mut exponent = 0;
@@ -1028,49 +1027,6 @@ mod tests {
     }
 
     #[test]
-    // FIXME: fails in debug mode. Check fn to see why.
-    fn test_scale_and_round_decryption() {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(10)
-            .build_global()
-            .unwrap();
-        let mut rng = thread_rng();
-        let bfv_params = BfvParameters::new(&[60, 60, 60, 60], 65537, 8);
-
-        let top_context = bfv_params.ciphertext_poly_contexts[0].clone();
-        let mut q_poly = Poly::random(&top_context, &Representation::Coefficient, &mut rng);
-
-        // let's scale q_poly by t/Q and switch its context from Q to t.
-        let t_coeffs = q_poly.scale_and_round_decryption(
-            &Modulus::new(bfv_params.plaintext_modulus),
-            bfv_params.max_bit_size_by2,
-            &bfv_params.t_qlhat_inv_modql_divql_modt[0],
-            &bfv_params.t_bqlhat_inv_modql_divql_modt[0],
-            &bfv_params.t_qlhat_inv_modql_divql_frac[0],
-            &bfv_params.t_bqlhat_inv_modql_divql_frac[0],
-        );
-
-        let q = q_poly.context.modulus();
-        let t = bfv_params.plaintext_modulus;
-        let t_expected = izip!(Vec::<BigUint>::from(&q_poly))
-            .map(|qi| -> BigUint {
-                if (&qi >= &(&q >> 1)) {
-                    if &q & BigUint::one() == BigUint::zero() {
-                        t - ((((t * (&q - &qi)) + ((&q >> 1) - 1u64)) / &q) % t)
-                    } else {
-                        t - ((((t * (&q - &qi)) + (&q >> 1)) / &q) % t)
-                    }
-                } else {
-                    (((&qi * t) + (&q >> 1)) / &q) % t
-                }
-            })
-            .map(|value| value.to_u64().unwrap())
-            .collect_vec();
-
-        assert_eq!(t_coeffs, t_expected);
-    }
-
-    #[test]
     fn substitution_works() {
         let bfv_params = BfvParameters::default(1, 1 << 3);
 
@@ -1083,11 +1039,8 @@ mod tests {
 
         // substitution by 1 should not change p
         let subs = Substitution::new(1, bfv_params.polynomial_degree);
-        let p_subs = p.substitute(&subs);
-        assert_eq!(p, p_subs);
-        let mut p_subs_ntt = p_ntt.substitute(&subs);
-        p_subs_ntt.change_representation(Representation::Coefficient);
-        assert_eq!(p, p_subs_ntt);
+        assert_eq!(p, p.substitute(&subs));
+        assert_eq!(p_ntt, p_ntt.substitute(&subs));
 
         for exp in [3, 5, 9] {
             let subs = Substitution::new(exp, bfv_params.polynomial_degree);
@@ -1128,6 +1081,49 @@ mod tests {
             assert_eq!(p, p_subs.substitute(&inv_subs));
             assert_eq!(p_ntt, p_subs_ntt.substitute(&inv_subs));
         }
+    }
+
+    #[test]
+    // FIXME: fails in debug mode. Check fn to see why.
+    fn test_scale_and_round_decryption() {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(10)
+            .build_global()
+            .unwrap();
+        let mut rng = thread_rng();
+        let bfv_params = BfvParameters::new(&[60, 60, 60, 60], 65537, 8);
+
+        let top_context = bfv_params.ciphertext_poly_contexts[0].clone();
+        let mut q_poly = Poly::random(&top_context, &Representation::Coefficient, &mut rng);
+
+        // let's scale q_poly by t/Q and switch its context from Q to t.
+        let t_coeffs = q_poly.scale_and_round_decryption(
+            &Modulus::new(bfv_params.plaintext_modulus),
+            bfv_params.max_bit_size_by2,
+            &bfv_params.t_qlhat_inv_modql_divql_modt[0],
+            &bfv_params.t_bqlhat_inv_modql_divql_modt[0],
+            &bfv_params.t_qlhat_inv_modql_divql_frac[0],
+            &bfv_params.t_bqlhat_inv_modql_divql_frac[0],
+        );
+
+        let q = q_poly.context.modulus();
+        let t = bfv_params.plaintext_modulus;
+        let t_expected = izip!(Vec::<BigUint>::from(&q_poly))
+            .map(|qi| -> BigUint {
+                if (&qi >= &(&q >> 1)) {
+                    if &q & BigUint::one() == BigUint::zero() {
+                        t - ((((t * (&q - &qi)) + ((&q >> 1) - 1u64)) / &q) % t)
+                    } else {
+                        t - ((((t * (&q - &qi)) + (&q >> 1)) / &q) % t)
+                    }
+                } else {
+                    (((&qi * t) + (&q >> 1)) / &q) % t
+                }
+            })
+            .map(|value| value.to_u64().unwrap())
+            .collect_vec();
+
+        assert_eq!(t_coeffs, t_expected);
     }
 
     // Tests for Main Polynomial operations //

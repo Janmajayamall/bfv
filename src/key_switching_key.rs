@@ -137,7 +137,7 @@ impl BVKeySwitchingKey {
     }
 }
 
-struct HybridKeySwitchingKey {
+pub struct HybridKeySwitchingKey {
     // ksk_ctx is q_ctx
     ksk_ctx: Arc<PolyContext>,
     p_ctx: Arc<PolyContext>,
@@ -373,7 +373,7 @@ impl HybridKeySwitchingKey {
         }
     }
 
-    pub fn switch(&self, poly: &Poly) -> Vec<Poly> {
+    pub fn switch(&self, poly: &Poly) -> (Poly, Poly) {
         debug_assert!(poly.representation == Representation::Coefficient);
         debug_assert!(poly.context == self.ksk_ctx);
 
@@ -488,7 +488,7 @@ impl HybridKeySwitchingKey {
             &self.p_inv_modq,
         );
 
-        vec![c0_out, c1_out]
+        (c0_out, c1_out)
     }
 
     pub fn generate_c1(
@@ -662,7 +662,7 @@ mod tests {
 
         let mut other_poly = Poly::random(&ct_ctx, &Representation::Coefficient, &mut rng);
         let now = std::time::Instant::now();
-        let cs = ksk.switch(&other_poly);
+        let (cs0, cs1) = ksk.switch(&other_poly);
         println!("Time elapsed: {:?}", now.elapsed());
 
         let mut sk_poly = Poly::try_convert_from_i64_small(
@@ -671,7 +671,7 @@ mod tests {
             &Representation::Coefficient,
         );
         sk_poly.change_representation(Representation::Evaluation);
-        let mut res = &cs[0] + &(&cs[1] * &sk_poly);
+        let mut res = &cs0 + &(&cs1 * &sk_poly);
 
         // expected
         other_poly.change_representation(Representation::Evaluation);
