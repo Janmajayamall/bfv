@@ -40,6 +40,7 @@ pub struct PolyContext {
     q: BigUint,
     q_dig: BigUintDig,
     pub degree: usize,
+    pub bit_reverse: Box<[usize]>,
 }
 
 impl PolyContext {
@@ -88,6 +89,11 @@ impl PolyContext {
             g.push(qh * qhi);
         });
 
+        let mut bit_reverse = (0..degree)
+            .map(|v| v.reverse_bits() >> (degree.leading_zeros() + 1))
+            .collect_vec()
+            .into_boxed_slice();
+
         PolyContext {
             moduli: moduli.to_vec().into_boxed_slice(),
             moduli_ops: moduli_ops.into_boxed_slice(),
@@ -98,6 +104,7 @@ impl PolyContext {
             q,
             q_dig,
             g: g.into_boxed_slice(),
+            bit_reverse,
         }
     }
 
@@ -107,6 +114,38 @@ impl PolyContext {
 
     pub fn modulus_dig(&self) -> BigUintDig {
         self.q_dig.clone()
+    }
+}
+
+pub struct Substitution {
+    exponent: usize,
+    power_bitrev: Box<[usize]>,
+    degree: usize,
+}
+
+impl Substitution {
+    /// Computes substitution map for polynomial degree
+    ///
+    /// expoenent must be an odd integer not a multiple of 2 * degree.
+    pub fn new(exponent: usize, degree: usize) -> Substitution {
+        assert!(exponent & 1 == 1);
+        let exponent = exponent % (2 * degree);
+        let mask = degree - 1;
+        let mut power = (exponent - 1) / 2;
+        let power_bitrev = (0..degree)
+            .map(|_| {
+                let r = (power & mask).reverse_bits() >> (degree.leading_zeros() + 1);
+                power += exponent;
+                r
+            })
+            .collect_vec()
+            .into_boxed_slice();
+
+        Substitution {
+            exponent,
+            power_bitrev,
+            degree,
+        }
     }
 }
 
@@ -207,28 +246,51 @@ impl Poly {
     }
 
     /// Given polynomial in Q(X) returns Q(X^i) for substitution element i.
-    /// In Evaluation form i must an odd integer not a multiple of 2*degree.
+    /// In Evaluation form i must be an odd integer not a multiple of 2*degree.
     /// In Coefficient form i must be an integer not a multiple of 2*degree.
-    pub fn substitute(&self, pow: usize) {
+    pub fn substitute(&self, subs: &Substitution) -> Poly {
+        debug_assert!(subs.exponent % (self.context.degree * 2) != 0);
+        debug_assert!(self.context.degree == subs.degree);
         let mut p = Poly::zero(&self.context, &self.representation);
 
-        if self.representation == Representation::Coefficient {
-            let mut exponent = 0;
-            let mask = (self.context.degree * 2) - 1;
-            for j in 0..self.context.degree {
+        if self.representation == Representation::Evaluation {
+            debug_assert!(subs.exponent & 1 == 1);
+
+            azip!(
+                self.context.bit_reverse.into_producer(),
+                subs.power_bitrev.into_producer()
+            )
+            .for_each(|br, pr| {
                 p.coefficients
-                    .slice_mut(s![.., j])
+                    .slice_mut(s![.., *br])
                     .as_slice_mut()
                     .unwrap()
-                    .copy_from_slice(
-                        self.coefficients
-                            .slice(s![.., mask & exponent])
-                            .as_slice()
-                            .unwrap(),
-                    );
-                exponent += pow;
+                    .copy_from_slice(self.coefficients.slice(s![.., *pr]).as_slice().unwrap());
+            });
+        } else if self.representation == Representation::Coefficient {
+            let mut exponent = 0;
+            let mask = self.context.degree - 1;
+            for j in 0..self.context.degree {
+                izip!(
+                    self.coefficients.slice(s![.., j]),
+                    p.coefficients.slice_mut(s![.., mask & exponent]),
+                    self.context.moduli_ops.iter()
+                )
+                .for_each(|(qxi, pxi, modqi)| {
+                    if exponent & self.context.degree != 0 {
+                        *pxi = modqi.sub_mod_fast(*pxi, *qxi);
+                    } else {
+                        *pxi = modqi.add_mod_fast(*pxi, *qxi);
+                    }
+                });
+
+                exponent += subs.exponent;
             }
+        } else {
+            panic!("Unknown polynomial representation!");
         }
+
+        p
     }
 
     pub fn scale_and_round_decryption(
@@ -949,6 +1011,23 @@ mod tests {
     };
 
     #[test]
+    pub fn test_poly_to_biguint() {
+        let rng = thread_rng();
+        let values = rng
+            .sample_iter(Uniform::new(0u128, 1 << 127))
+            .take(8)
+            .map(BigUint::from)
+            .collect_vec();
+
+        let bfv_params = BfvParameters::new(&[60, 60, 60, 60], 65537, 8);
+        let top_context = bfv_params.ciphertext_poly_contexts[0].clone();
+        let q_poly =
+            Poly::try_convert_from_biguint(&values, &top_context, &Representation::Coefficient);
+
+        assert_eq!(values, Vec::<BigUint>::from(&q_poly));
+    }
+
+    #[test]
     // FIXME: fails in debug mode. Check fn to see why.
     fn test_scale_and_round_decryption() {
         rayon::ThreadPoolBuilder::new()
@@ -992,22 +1071,66 @@ mod tests {
     }
 
     #[test]
-    pub fn test_poly_to_biguint() {
-        let rng = thread_rng();
-        let values = rng
-            .sample_iter(Uniform::new(0u128, 1 << 127))
-            .take(8)
-            .map(BigUint::from)
-            .collect_vec();
+    fn substitution_works() {
+        let bfv_params = BfvParameters::default(1, 1 << 3);
 
-        let bfv_params = BfvParameters::new(&[60, 60, 60, 60], 65537, 8);
-        let top_context = bfv_params.ciphertext_poly_contexts[0].clone();
-        let q_poly =
-            Poly::try_convert_from_biguint(&values, &top_context, &Representation::Coefficient);
+        let ctx = bfv_params.ciphertext_poly_contexts[0].clone();
+        let mut rng = thread_rng();
 
-        assert_eq!(values, Vec::<BigUint>::from(&q_poly));
+        let p = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
+        let mut p_ntt = p.clone();
+        p_ntt.change_representation(Representation::Evaluation);
+
+        // substitution by 1 should not change p
+        let subs = Substitution::new(1, bfv_params.polynomial_degree);
+        let p_subs = p.substitute(&subs);
+        assert_eq!(p, p_subs);
+        let mut p_subs_ntt = p_ntt.substitute(&subs);
+        p_subs_ntt.change_representation(Representation::Coefficient);
+        assert_eq!(p, p_subs_ntt);
+
+        for exp in [3, 5, 9] {
+            let subs = Substitution::new(exp, bfv_params.polynomial_degree);
+
+            let p = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
+            let mut p_ntt = p.clone();
+            p_ntt.change_representation(Representation::Evaluation);
+
+            let p_subs = p.substitute(&subs);
+            // substitue using biguints
+            let p_biguint = Vec::<BigUint>::from(&p);
+            let mut p_biguint_subs = vec![BigUint::zero(); bfv_params.polynomial_degree];
+            p_biguint.iter().enumerate().for_each(|(i, v)| {
+                let wraps = (i * subs.exponent) / bfv_params.polynomial_degree;
+                let index = (i * subs.exponent) % bfv_params.polynomial_degree;
+                if (wraps & 1 == 1) {
+                    p_biguint_subs[index] += (p.context.modulus() - v);
+                } else {
+                    p_biguint_subs[index] += v;
+                }
+            });
+            assert_eq!(p_biguint_subs, Vec::<BigUint>::from(&p_subs));
+
+            // check subs in evaluation form
+            let p_subs_ntt = p_ntt.substitute(&subs);
+            let mut p_subs_ntt_clone = p_subs_ntt.clone();
+            p_subs_ntt_clone.change_representation(Representation::Coefficient);
+            assert_eq!(p_subs, p_subs_ntt_clone);
+
+            // substitution by [exp^-1]_(2*degree) on polynomial that was substitution bu exp
+            // must result to original polynomial
+            let exp_inv = BigUintDig::from(exp)
+                .mod_inverse(BigUintDig::from(2 * ctx.degree))
+                .unwrap()
+                .to_usize()
+                .unwrap();
+            let inv_subs = Substitution::new(exp_inv, bfv_params.polynomial_degree);
+            assert_eq!(p, p_subs.substitute(&inv_subs));
+            assert_eq!(p_ntt, p_subs_ntt.substitute(&inv_subs));
+        }
     }
 
+    // Tests for Main Polynomial operations //
     #[test]
     pub fn test_fast_conv_p_over_q() {
         let mut rng = thread_rng();

@@ -6,7 +6,6 @@ use bfv::{
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use itertools::izip;
 use ndarray::Array2;
-use num_bigint::BigUint;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{FromPrimitive, ToPrimitive};
 use pprof::criterion::{Output, PProfProfiler};
