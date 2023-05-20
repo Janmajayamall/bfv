@@ -614,7 +614,7 @@ impl Poly {
         };
 
         // switch p to q
-        let q = p.switch_crt_basis(
+        let mut q = p.switch_crt_basis(
             &self.context,
             p_hat_modq,
             p_hat_inv_modp,
@@ -632,28 +632,6 @@ impl Poly {
         pq.coefficients
             .slice_mut(s![p_size.., ..])
             .assign(&q.coefficients);
-        // izip!(
-        //     pq.coefficients.outer_iter_mut(),
-        //     p.coefficients.outer_iter()
-        // )
-        // .for_each(|(mut pq_row, p_row)| {
-        //     pq_row
-        //         .as_slice_mut()
-        //         .unwrap()
-        //         .copy_from_slice(p_row.as_slice().unwrap());
-        // });
-        // izip!(
-        //     pq.coefficients
-        //         .outer_iter_mut()
-        //         .skip(p_context.moduli.len()),
-        //     q.coefficients.outer_iter()
-        // )
-        // .for_each(|(mut pq_row, q_row)| {
-        //     pq_row
-        //         .as_slice_mut()
-        //         .unwrap()
-        //         .copy_from_slice(q_row.as_slice().unwrap());
-        // });
 
         pq
     }

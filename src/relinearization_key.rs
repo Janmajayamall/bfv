@@ -38,11 +38,11 @@ impl RelinearizationKey {
     pub fn relinearize(&self, ct: &Ciphertext) -> Ciphertext {
         // switch fn in ksk already checks for matchin poly ctx. Don't check here
         debug_assert!(ct.c.len() == 3); // otherwise invalid relinerization
-        debug_assert!(ct.c[0].representation == Representation::Evaluation);
+        debug_assert!(ct.c[0].representation == Representation::Coefficient);
 
-        let mut c2: Poly = ct.c[2].clone();
-        c2.change_representation(Representation::Coefficient);
-        let (mut cs0, mut cs1) = self.ksk.switch(&c2);
+        let (mut cs0, mut cs1) = self.ksk.switch(&ct.c[2]);
+        cs0.change_representation(Representation::Coefficient);
+        cs1.change_representation(Representation::Coefficient);
         cs0 += &ct.c[0];
         cs1 += &ct.c[1];
 

@@ -69,7 +69,7 @@ impl SecretKey {
         let mut sk_poly = self.to_poly(encoding.level);
 
         let m = pt.to_poly();
-        let a = Poly::random(
+        let mut a = Poly::random(
             &self.params.ciphertext_poly_contexts[encoding.level],
             &Representation::Evaluation,
             rng,
@@ -85,6 +85,9 @@ impl SecretKey {
         e -= &sk_poly;
         e += &m;
 
+        e.change_representation(Representation::Coefficient);
+        a.change_representation(Representation::Coefficient);
+
         Ciphertext {
             c: vec![e, a],
             params: self.params.clone(),
@@ -99,11 +102,19 @@ impl SecretKey {
         debug_assert!(ct.params == self.params);
 
         let mut m = ct.c[0].clone();
-        debug_assert!(m.representation == Representation::Evaluation);
-        let mut s = self.to_poly(ct.level);
+        m.change_representation(Representation::Evaluation);
+
+        let s = self.to_poly(ct.level);
         let mut s_carry = s.clone();
         for i in 1..ct.c.len() {
-            m += &(&s_carry * &ct.c[i]);
+            if ct.c[i].representation == Representation::Evaluation {
+                m += &(&s_carry * &ct.c[i]);
+            } else {
+                let mut tmp = ct.c[i].clone();
+                tmp.change_representation(Representation::Evaluation);
+                tmp *= &s_carry;
+                m += &tmp;
+            }
             s_carry *= &s;
         }
 
@@ -131,10 +142,18 @@ impl SecretKey {
         let m = Plaintext::encode(&m, &ct.params, Encoding::simd(ct.level)).to_poly();
 
         let mut m2 = ct.c[0].clone();
+        m2.change_representation(Representation::Evaluation);
         let s = self.to_poly(ct.level);
         let mut s_carry = s.clone();
         for i in 1..ct.c.len() {
-            m2 += &(&s_carry * &ct.c[i]);
+            if ct.c[i].representation == Representation::Evaluation {
+                m2 += &(&s_carry * &ct.c[i]);
+            } else {
+                let mut tmp = ct.c[i].clone();
+                tmp.change_representation(Representation::Evaluation);
+                tmp *= &s_carry;
+                m2 += &tmp;
+            }
             s_carry *= &s;
         }
 

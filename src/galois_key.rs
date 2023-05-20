@@ -1,6 +1,8 @@
 use rand::{CryptoRng, RngCore};
 
-use crate::{Ciphertext, HybridKeySwitchingKey, Poly, PolyContext, SecretKey, Substitution};
+use crate::{
+    Ciphertext, HybridKeySwitchingKey, Poly, PolyContext, Representation, SecretKey, Substitution,
+};
 use std::sync::Arc;
 
 pub struct GaloisKey {
@@ -42,7 +44,10 @@ impl GaloisKey {
 
         // Key switch c1
         let mut c1 = ct.c[1].substitute(&self.substitution);
-        c1.change_representation(crate::Representation::Coefficient);
+        if c1.representation == Representation::Evaluation {
+            c1.change_representation(crate::Representation::Coefficient);
+        }
+
         let (mut cs0, mut cs1) = self.ksk_key.switch(&c1);
 
         // Key switch returns polynomial in Evaluation form

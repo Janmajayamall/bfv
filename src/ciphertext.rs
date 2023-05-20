@@ -38,6 +38,10 @@ impl Ciphertext {
             &self.params.ql_inv[level],
             &self.params.alphal_modp[level],
         );
+        if c00.representation != Representation::Evaluation {
+            c00.change_representation(Representation::Evaluation);
+            c01.change_representation(Representation::Evaluation);
+        }
         // println!("Extend1 {:?}", now.elapsed());
 
         // now = std::time::Instant::now();
@@ -103,9 +107,9 @@ impl Ciphertext {
                 )
             })
             .collect_vec();
-        c.iter_mut().for_each(|p| {
-            p.change_representation(Representation::Evaluation);
-        });
+        // c.iter_mut().for_each(|p| {
+        //     p.change_representation(Representation::Evaluation);
+        // });
         // println!("Scale Down {:?}", now.elapsed());
 
         Ciphertext {
@@ -139,11 +143,7 @@ mod tests {
             .unwrap();
 
         let mut rng = thread_rng();
-        let params = Arc::new(BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
-            65537,
-            1 << 15,
-        ));
+        let params = Arc::new(BfvParameters::new(&[60, 60, 60], 65537, 1 << 15));
         let sk = SecretKey::random(&params, &mut rng);
 
         let mut m1 = rng
