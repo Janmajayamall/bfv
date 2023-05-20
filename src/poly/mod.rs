@@ -756,6 +756,8 @@ impl Poly {
         p_inv_modq: &[u64],
     ) {
         debug_assert!(q_context.moduli.len() + p_context.moduli.len() == self.context.moduli.len());
+        debug_assert!(self.representation == Representation::Evaluation);
+
         let q_size = q_context.moduli.len();
 
         // Change P part of QP from `Evaluation` to `Coefficient` representation
