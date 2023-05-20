@@ -2,7 +2,7 @@ use crate::modulus::Modulus;
 use crate::nb_theory::generate_primes_vec;
 use crate::poly::{Poly, PolyContext, Representation};
 use fhe_math::zq::{ntt::NttOperator, Modulus as ModulusOld};
-use itertools::izip;
+use itertools::{izip, Itertools};
 use ndarray::Array2;
 use num_bigint::BigUint;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
@@ -59,6 +59,9 @@ pub struct BfvParameters {
     pub ql_inv: Vec<Vec<f64>>,
     pub alphal_modp: Vec<Array2<u64>>,
     // Hybrid key switching
+
+    // Mod Down //
+    pub lastq_inv_modq: Vec<Vec<u64>>,
 }
 
 impl BfvParameters {
@@ -489,6 +492,17 @@ impl BfvParameters {
             },
         );
 
+        // Mod down next //
+        let mut lastq_inv_modq = vec![];
+        poly_contexts.iter().for_each(|ctx| {
+            let lastq = ctx.moduli.last().unwrap();
+            let tmp = ctx.moduli_ops[..ctx.moduli.len() - 1]
+                .iter()
+                .map(|modqi| modqi.inv(*lastq))
+                .collect_vec();
+            lastq_inv_modq.push(tmp);
+        });
+
         // To generate mapping for matrix representation index, we use: https://github.com/microsoft/SEAL/blob/82b07db635132e297282649e2ab5908999089ad2/native/src/seal/batchencoder.cpp
         let row = polynomial_degree >> 1;
         let m = polynomial_degree << 1;
@@ -561,6 +575,9 @@ impl BfvParameters {
             alphal_modp,
             max_bit_size_by2: b,
             matrix_reps_index_map,
+
+            // Mod down next //
+            lastq_inv_modq,
         }
     }
 

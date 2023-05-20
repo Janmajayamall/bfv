@@ -37,7 +37,7 @@ impl Modulus {
     }
 
     /// Computes modulus exponentiation using binary exponentiation
-    pub fn exp(&self, mut a: u64, mut e: u64) -> u64 {
+    pub fn exp(&self, mut a: u64, mut e: usize) -> u64 {
         let mut r = 1u64;
         while e != 0 {
             if e & 1 == 1 {
@@ -58,7 +58,7 @@ impl Modulus {
         if a == 0 {
             0
         } else {
-            self.exp(a, self.modulus - 2)
+            self.exp(a, (self.modulus - 2) as usize)
         }
     }
 
@@ -439,7 +439,7 @@ mod tests {
         let mut rng = thread_rng();
         for _ in 0..1000 {
             let a = rng.gen::<u64>() % prime;
-            let e = rng.gen::<u64>();
+            let e = rng.gen::<usize>();
             let res = modulus.exp(a, e);
             let expected = BigUintDig::from(a)
                 .modpow(&BigUintDig::from(e), &BigUintDig::from(prime))

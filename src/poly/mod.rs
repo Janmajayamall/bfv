@@ -811,6 +811,23 @@ impl Poly {
         // Switch ctx from QP to Q
         self.context = q_context.clone();
     }
+
+    pub fn mod_down_next(&mut self, last_qi_inv_modq: &[u64], new_ctx: &Arc<PolyContext>) {
+        let p = self.coefficients.slice(s![-1, ..]).to_owned();
+        self.coefficients.slice_collapse(s![..-1, ..]);
+        azip!(
+            self.coefficients.outer_iter_mut().into_producer(),
+            new_ctx.moduli_ops.into_producer(),
+            last_qi_inv_modq.into_producer()
+        )
+        .for_each(|mut ceoffs, modqi, last_qi_modqi| {
+            let mut tmp = p.clone();
+            modqi.reduce_vec(tmp.as_slice_mut().unwrap());
+            modqi.sub_mod_fast_vec(ceoffs.as_slice_mut().unwrap(), tmp.as_slice().unwrap());
+            modqi.scalar_mul_mod_fast_vec(ceoffs.as_slice_mut().unwrap(), *last_qi_modqi);
+        });
+        self.context = new_ctx.clone();
+    }
 }
 
 impl AddAssign<&Poly> for Poly {
@@ -1385,7 +1402,7 @@ mod tests {
         let mut rng = thread_rng();
         let polynomial_degree = 1 << 3;
         let q_moduli = generate_primes_vec(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
-        let p_moduli = generate_primes_vec(&vec![60, 60], polynomial_degree, &q_moduli);
+        let p_moduli = generate_primes_vec(&vec![60], polynomial_degree, &q_moduli);
         let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
 
         let q_context = Arc::new(PolyContext::new(&q_moduli, polynomial_degree));
@@ -1453,52 +1470,68 @@ mod tests {
 
         qp_poly.change_representation(Representation::Coefficient);
 
-        let q_poly = {
-            let coeff = qp_poly.coefficients.slice(s![..q_size, ..]).to_owned();
-            assert!(coeff.shape()[0] == q_size);
-            Poly::new(coeff, &q_context, Representation::Coefficient)
-        };
-        let p_poly = {
-            let coeff = qp_poly.coefficients.slice(s![q_size.., ..]).to_owned();
-            assert!(coeff.shape()[0] == p_size);
-            Poly::new(coeff, &p_context, Representation::Coefficient)
-        };
-
         let qp = qp_context.modulus();
         let q = q_context.modulus();
         let p = p_context.modulus();
-        let p_inv_modq = {
-            let dig = p_context
-                .modulus_dig()
-                .mod_inverse(BigUintDig::from_bytes_le(&q.to_bytes_le()))
-                .unwrap()
-                .to_biguint()
-                .unwrap();
 
-            BigUint::from_bytes_le(&dig.to_bytes_le())
-        };
-
-        let p_switched = Vec::<BigUint>::from(&p_poly)
+        let q_expected: Vec<BigUint> = Vec::<BigUint>::from(&qp_poly)
             .iter()
             .map(|xi| {
-                if xi > &(&p >> 1) {
-                    &q - ((&p - xi) % &q)
+                if xi > &(&qp >> 1usize) {
+                    if &qp & BigUint::one() == BigUint::zero() {
+                        &q - (((&qp - xi) + ((&p >> 1) - 1usize)) / &p) % &q
+                    } else {
+                        &q - (((&qp - xi) + (&p >> 1)) / &p) % &q
+                    }
                 } else {
-                    xi % &q
+                    ((xi + (&p >> 1)) / &p) % &q
                 }
             })
             .collect_vec();
-        // convert p_poly to q
-        let q_expected = izip!(Vec::<BigUint>::from(&q_poly).iter(), p_switched.iter())
-            .map(|(qv, pv)| ((qv + (&q - pv)) * &p_inv_modq) % &q)
-            .collect_vec();
 
-        let q_res: Vec<BigUint> = Vec::<BigUint>::from(&q_res)
+        izip!(Vec::<BigUint>::from(&q_res), q_expected.iter()).for_each(|(res, expected)| {
+            let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
+            // assert!(diff <= BigInt::one());
+            dbg!(diff);
+        });
+    }
+
+    #[test]
+    pub fn test_mod_down_next() {
+        let mut rng = thread_rng();
+        let degree = 1 << 3;
+        let params = BfvParameters::default(15, degree);
+        let q_ctx = params.ciphertext_ctx_at_level(0);
+
+        let q_poly = Poly::random(&q_ctx, &Representation::Coefficient, &mut rng);
+
+        let last_qi = q_ctx.moduli.last().unwrap();
+
+        let mut q_res_poly = q_poly.clone();
+        q_res_poly.mod_down_next(
+            &params.lastq_inv_modq[0],
+            &params.ciphertext_ctx_at_level(1),
+        );
+
+        let q = q_ctx.modulus();
+        let q_next = params.ciphertext_ctx_at_level(1).modulus();
+        let p = *last_qi;
+        let q_expected: Vec<BigUint> = Vec::<BigUint>::from(&q_poly)
             .iter()
-            .map(|xi| xi.clone())
+            .map(|xi| {
+                if xi > &(&q >> 1usize) {
+                    if &q_next & BigUint::one() == BigUint::zero() {
+                        &q_next - (((&q - xi) + ((p >> 1) - 1u64)) / p) % &q_next
+                    } else {
+                        &q_next - (((&q - xi) + (p >> 1)) / p) % &q_next
+                    }
+                } else {
+                    ((xi + (p >> 1)) / p) % &q_next
+                }
+            })
             .collect_vec();
 
-        izip!(q_res.iter(), q_expected.iter()).for_each(|(res, expected)| {
+        izip!(Vec::<BigUint>::from(&q_res_poly), q_expected.iter()).for_each(|(res, expected)| {
             let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
             // assert!(diff <= BigInt::one());
             dbg!(diff);

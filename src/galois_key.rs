@@ -1,7 +1,9 @@
+use num_traits::ToPrimitive;
 use rand::{CryptoRng, RngCore};
 
 use crate::{
-    Ciphertext, HybridKeySwitchingKey, Poly, PolyContext, Representation, SecretKey, Substitution,
+    Ciphertext, HybridKeySwitchingKey, Modulus, Poly, PolyContext, Representation, SecretKey,
+    Substitution,
 };
 use std::sync::Arc;
 
@@ -64,6 +66,20 @@ impl GaloisKey {
             level: ct.level,
         }
     }
+
+    /// Retursn galois element correponding to desired rotation by i.
+    ///
+    /// Galois element: 3^i % M is will rotate left by i
+    /// Galois element: 3^(N/2-1) will rotate right by i
+    pub fn rot_to_galois_element(i: isize, n: usize) -> usize {
+        let m = 2 * n;
+        let modm = Modulus::new(m as u64);
+        if i > 0 {
+            modm.exp(3, i as usize) as usize
+        } else {
+            modm.exp(3, n / 2 - (i.abs().to_usize().unwrap())) as usize
+        }
+    }
 }
 
 #[cfg(test)]
@@ -93,5 +109,14 @@ mod tests {
 
         let res_m = sk.decrypt(&ct_rotated).decode(Encoding::simd(0));
         dbg!(m, res_m);
+    }
+
+    #[test]
+    fn galois_el_works() {
+        let mut v = vec![];
+        for i in 0..4 {
+            v.push(GaloisKey::rot_to_galois_element(i, 8));
+        }
+        dbg!(v);
     }
 }

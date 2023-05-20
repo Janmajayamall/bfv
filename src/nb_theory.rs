@@ -61,8 +61,8 @@ pub fn primitive_element(p: u64, n: usize) -> Option<u64> {
 
     for _ in 0..100 {
         let mut root = rng.gen_range(0..p.modulus());
-        root = p.exp(root, lambda);
-        if p.exp(root, m) == 1 && p.exp(root, m / 2) != 1 {
+        root = p.exp(root, lambda as usize);
+        if p.exp(root, m as usize) == 1 && p.exp(root, (m / 2) as usize) != 1 {
             return Some(root);
         }
     }
