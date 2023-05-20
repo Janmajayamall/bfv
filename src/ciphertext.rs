@@ -1,6 +1,9 @@
 use crate::parameters::BfvParameters;
 use crate::poly::{Poly, Representation};
 use itertools::Itertools;
+use ndarray::azip;
+use rayon::*;
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 use std::sync::Arc;
 
 pub struct Ciphertext {
@@ -112,6 +115,58 @@ impl Ciphertext {
         // });
         // println!("Scale Down {:?}", now.elapsed());
 
+        Ciphertext {
+            c,
+            params: self.params.clone(),
+            level: self.level,
+        }
+    }
+}
+
+impl AddAssign<&Ciphertext> for Ciphertext {
+    fn add_assign(&mut self, rhs: &Ciphertext) {
+        self.c.iter_mut().zip(rhs.c.iter()).for_each(|(a, b)| {
+            *a += b;
+        })
+    }
+}
+
+impl Add<&Ciphertext> for &Ciphertext {
+    type Output = Ciphertext;
+
+    fn add(self, rhs: &Ciphertext) -> Self::Output {
+        let c = self
+            .c
+            .iter()
+            .zip(rhs.c.iter())
+            .map(|(a, b)| a + b)
+            .collect_vec();
+        Ciphertext {
+            c,
+            params: self.params.clone(),
+            level: self.level,
+        }
+    }
+}
+
+impl SubAssign<&Ciphertext> for Ciphertext {
+    fn sub_assign(&mut self, rhs: &Ciphertext) {
+        self.c.iter_mut().zip(rhs.c.iter()).for_each(|(a, b)| {
+            *a -= b;
+        })
+    }
+}
+
+impl Sub<&Ciphertext> for &Ciphertext {
+    type Output = Ciphertext;
+
+    fn sub(self, rhs: &Ciphertext) -> Self::Output {
+        let c = self
+            .c
+            .iter()
+            .zip(rhs.c.iter())
+            .map(|(a, b)| a - b)
+            .collect_vec();
         Ciphertext {
             c,
             params: self.params.clone(),

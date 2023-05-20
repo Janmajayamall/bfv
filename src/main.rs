@@ -36,5 +36,4 @@ fn main() {
     let ct3 = ct1.multiply1(&ct2);
     println!("total time: {:?}", now.elapsed());
 
-    // t com
 }
