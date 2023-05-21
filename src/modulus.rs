@@ -628,30 +628,40 @@ mod tests {
 
     #[test]
     fn test_perf_fma() {
-        let size = 1 << 20;
+        let size = 1 << 3;
+        let count = 512;
         let mut rng = thread_rng();
         let prime = generate_prime(60, 1 << 16, 1 << 60).unwrap();
         let modulus = Modulus::new(prime);
+        dbg!(size, prime);
         for _ in 0..1 {
-            let a = modulus.random_vec(size, &mut rng);
-            let b = modulus.random_vec(size, &mut rng);
+            let mut a = (0..count)
+                .map(|_| modulus.random_vec(size, &mut rng))
+                .collect_vec();
+            let b = (0..count)
+                .map(|_| modulus.random_vec(size, &mut rng))
+                .collect_vec();
 
             // Note: this method overflows at addition if log(size) > 128 - log(prime)*2
             let now = std::time::Instant::now();
-            let mut r_u128 = 0u128;
-            izip!(a.iter(), b.iter()).for_each(|(v, v1)| {
-                r_u128 += *v as u128 * *v1 as u128;
+            let mut d = vec![0u128; size];
+            izip!(a.iter(), b.iter()).for_each(|(a0, b0)| {
+                izip!(d.iter_mut(), a0.iter(), b0.iter()).for_each(|(r, a1, b1)| {
+                    *r += (*a1 as u128 * *b1 as u128);
+                });
             });
-            let r = modulus.barret_reduction_u128(r_u128);
-            println!("time u128: {r} {:?}", now.elapsed());
+            let r = modulus.barret_reduction_u128_vec(&d);
+            println!("time u128: {:?}", now.elapsed());
 
+            let mut a_clone = a.clone();
             let now = std::time::Instant::now();
-            let mut r1 = 0u64;
-            izip!(a.iter(), b.iter()).for_each(|(v, v1)| {
-                r1 = modulus.add_mod_fast(r1, modulus.mul_mod_fast(*v, *v1));
+            let mut r1 = vec![0u64; size];
+            izip!(a_clone.iter_mut(), b.iter()).for_each(|(a0, b0)| {
+                modulus.mul_mod_fast_vec(a0, b0);
+                modulus.add_mod_fast_vec(&mut r1, a0);
             });
-            println!("time: {r1} {:?}", now.elapsed());
-            // assert_eq!(r1, r);
+            println!("time:  {:?}", now.elapsed());
+            assert_eq!(r1, r);
         }
     }
 }

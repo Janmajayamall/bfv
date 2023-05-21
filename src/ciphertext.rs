@@ -11,10 +11,18 @@ use std::sync::Arc;
 pub struct Ciphertext {
     pub(crate) c: Vec<Poly>,
     pub(crate) params: Arc<BfvParameters>,
-    pub(crate) level: usize,
+    pub level: usize,
 }
 
 impl Ciphertext {
+    pub fn new(c: Vec<Poly>, params: Arc<BfvParameters>, level: usize) -> Ciphertext {
+        Ciphertext {
+            c,
+            params: params.clone(),
+            level,
+        }
+    }
+
     pub fn zero(params: &Arc<BfvParameters>, level: usize) -> Ciphertext {
         Ciphertext {
             params: params.clone(),
@@ -150,6 +158,10 @@ impl Ciphertext {
 
     pub fn params(&self) -> Arc<BfvParameters> {
         self.params.clone()
+    }
+
+    pub fn c_ref(&self) -> &[Poly] {
+        &self.c
     }
 
     pub fn is_zero(&self) -> bool {

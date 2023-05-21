@@ -24,6 +24,7 @@ impl Encoding {
     }
 }
 
+#[derive(Clone)]
 pub struct Plaintext {
     pub(crate) m: Vec<u64>,
     pub(crate) params: Arc<BfvParameters>,
@@ -111,5 +112,9 @@ impl Plaintext {
                 panic!("Encoding not specified!");
             }
         }
+    }
+
+    pub fn poly_ntt_ref(&self) -> &Poly {
+        self.poly_ntt.as_ref().expect("Missing poly ntt")
     }
 }

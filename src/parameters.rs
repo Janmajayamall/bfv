@@ -582,7 +582,7 @@ impl BfvParameters {
     }
 
     pub fn default(moduli_count: usize, polynomial_degree: usize) -> Self {
-        BfvParameters::new(&vec![60; moduli_count], 65537, polynomial_degree)
+        BfvParameters::new(&vec![59; moduli_count], 65537, polynomial_degree)
     }
 
     pub fn ciphertext_ctx_at_level(&self, level: usize) -> Arc<PolyContext> {
