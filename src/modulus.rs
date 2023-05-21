@@ -316,6 +316,14 @@ impl Modulus {
             .for_each(|(va, vb, vb_shoup)| *va = self.mul_mod_shoup(*va, *vb, *vb_shoup));
     }
 
+    /// FMA reverse
+    /// Reverse because calculates a + b*c
+    pub fn fma_reverse_vec(&self, a: &mut [u64], b: &[u64], c: &[u64]) {
+        let mut b = b.to_vec();
+        self.mul_mod_fast_vec(&mut b, c);
+        self.add_mod_fast_vec(a, &b);
+    }
+
     /// Barrett modulus multiplication of scalar with vector a
     ///
     /// Assumes scalar and all elements in a are smaller than modulus
@@ -600,28 +608,50 @@ mod tests {
     }
 
     #[test]
-    fn test_perf_fma() {
-        let size = 1 << 11;
-        let mut rng = thread_rng();
-        let prime = generate_prime(59, 16, 1 << 59).unwrap();
+    fn fma_reverse_vec_works() {
+        let prime = generate_prime(60, 16, 1 << 60).unwrap();
         let modulus = Modulus::new(prime);
-        let a = modulus.random_vec(size, &mut rng);
-        let b = modulus.random_vec(size, &mut rng);
+        let mut rng = thread_rng();
+        let mut a = modulus.random_vec(1 << 3, &mut rng);
+        let a_clone = a.clone();
+        let b = modulus.random_vec(1 << 3, &mut rng);
+        let c = modulus.random_vec(1 << 3, &mut rng);
+        modulus.fma_reverse_vec(&mut a, &b, &c);
 
-        // Note: this method overflows at addition if log(size) > 128 - log(prime)*2
-        let now = std::time::Instant::now();
-        let mut r_u128 = 0u128;
-        izip!(a.iter(), b.iter()).for_each(|(v, v1)| {
-            r_u128 += *v as u128 * *v1 as u128;
-        });
-        let r = modulus.barret_reduction_u128(r_u128);
-        println!("time u128: {r} {:?}", now.elapsed());
+        izip!(a.iter(), a_clone.iter(), b.iter(), c.iter()).for_each(|(r, a0, b0, c0)| {
+            assert_eq!(
+                *r,
+                (a0 + ((*b0 as u128 * *c0 as u128) % prime as u128) as u64) % prime
+            );
+        })
+    }
 
-        let now = std::time::Instant::now();
-        let mut r = 0u64;
-        izip!(a.iter(), b.iter()).for_each(|(v, v1)| {
-            r = modulus.add_mod_fast(r, modulus.mul_mod_fast(*v, *v1));
-        });
-        println!("time: {r} {:?}", now.elapsed());
+    #[test]
+    fn test_perf_fma() {
+        let size = 1 << 20;
+        let mut rng = thread_rng();
+        let prime = generate_prime(60, 1 << 16, 1 << 60).unwrap();
+        let modulus = Modulus::new(prime);
+        for _ in 0..1 {
+            let a = modulus.random_vec(size, &mut rng);
+            let b = modulus.random_vec(size, &mut rng);
+
+            // Note: this method overflows at addition if log(size) > 128 - log(prime)*2
+            let now = std::time::Instant::now();
+            let mut r_u128 = 0u128;
+            izip!(a.iter(), b.iter()).for_each(|(v, v1)| {
+                r_u128 += *v as u128 * *v1 as u128;
+            });
+            let r = modulus.barret_reduction_u128(r_u128);
+            println!("time u128: {r} {:?}", now.elapsed());
+
+            let now = std::time::Instant::now();
+            let mut r1 = 0u64;
+            izip!(a.iter(), b.iter()).for_each(|(v, v1)| {
+                r1 = modulus.add_mod_fast(r1, modulus.mul_mod_fast(*v, *v1));
+            });
+            println!("time: {r1} {:?}", now.elapsed());
+            // assert_eq!(r1, r);
+        }
     }
 }

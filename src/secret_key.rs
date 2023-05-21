@@ -127,11 +127,11 @@ impl SecretKey {
             &self.params.t_qlhat_inv_modql_divql_frac[ct.level],
             &self.params.t_bqlhat_inv_modql_divql_frac[ct.level],
         );
-
         Plaintext {
             m,
             params: self.params.clone(),
             encoding: None,
+            poly_ntt: None,
         }
     }
 

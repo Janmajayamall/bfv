@@ -28,11 +28,10 @@ pub struct Plaintext {
     pub(crate) m: Vec<u64>,
     pub(crate) params: Arc<BfvParameters>,
     pub(crate) encoding: Option<Encoding>,
+    pub(crate) poly_ntt: Option<Poly>,
 }
 
 impl Plaintext {
-    pub fn new() {}
-
     /// Encodes a given message `m` to plaintext using given `encoding`
     ///
     /// Panics if `m` values length is greater than polynomial degree
@@ -55,10 +54,16 @@ impl Plaintext {
             params.plaintext_ntt_op.backward(&mut m1);
         }
 
+        // convert m to polynomial with poly context at specific level
+        let ctx = params.ciphertext_ctx_at_level(encoding.level);
+        let mut poly_ntt = Poly::try_convert_from_u64(&m1, &ctx, &Representation::Coefficient);
+        poly_ntt.change_representation(Representation::Evaluation);
+
         Plaintext {
             m: m1,
             params: params.clone(),
             encoding: Some(encoding),
+            poly_ntt: Some(poly_ntt),
         }
     }
 

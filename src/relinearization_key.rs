@@ -6,7 +6,7 @@ use crate::{
 };
 use std::sync::Arc;
 
-struct RelinearizationKey {
+pub struct RelinearizationKey {
     ciphertext_ctx: Arc<PolyContext>,
     ksk: HybridKeySwitchingKey,
 }

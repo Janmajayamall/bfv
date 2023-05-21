@@ -17,4 +17,5 @@ pub use modulus::*;
 pub use parameters::*;
 pub use plaintext::*;
 pub use poly::*;
+pub use relinearization_key::*;
 pub use secret_key::*;

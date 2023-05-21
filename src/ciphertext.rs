@@ -1,11 +1,13 @@
 use crate::parameters::BfvParameters;
 use crate::poly::{Poly, Representation};
+use crate::Plaintext;
 use itertools::Itertools;
 use ndarray::azip;
 use rayon::*;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 use std::sync::Arc;
 
+#[derive(Debug, Clone)]
 pub struct Ciphertext {
     pub(crate) c: Vec<Poly>,
     pub(crate) params: Arc<BfvParameters>,
@@ -13,6 +15,14 @@ pub struct Ciphertext {
 }
 
 impl Ciphertext {
+    pub fn zero(params: &Arc<BfvParameters>, level: usize) -> Ciphertext {
+        Ciphertext {
+            params: params.clone(),
+            level,
+            c: vec![],
+        }
+    }
+
     pub fn multiply1(&self, rhs: &Ciphertext) -> Ciphertext {
         debug_assert!(self.params == rhs.params);
         debug_assert!(self.c.len() == 2);
@@ -115,6 +125,47 @@ impl Ciphertext {
         // });
         // println!("Scale Down {:?}", now.elapsed());
 
+        Ciphertext {
+            c,
+            params: self.params.clone(),
+            level: self.level,
+        }
+    }
+
+    pub fn fma_reverse_inplace(&mut self, ct: &Ciphertext, pt: &Plaintext) {
+        self.c.iter_mut().zip(ct.c.iter()).for_each(|(a, b)| {
+            a.fma_reverse_inplace(b, pt.poly_ntt.as_ref().expect("Missing poly_ntt!"))
+        });
+    }
+
+    pub fn change_representation(&mut self, to: &Representation) {
+        self.c
+            .iter_mut()
+            .for_each(|p| p.change_representation(to.clone()))
+    }
+
+    pub fn level(&self) -> usize {
+        self.level
+    }
+
+    pub fn params(&self) -> Arc<BfvParameters> {
+        self.params.clone()
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.c.is_empty()
+    }
+}
+
+impl Mul<&Plaintext> for &Ciphertext {
+    type Output = Ciphertext;
+    fn mul(self, rhs: &Plaintext) -> Self::Output {
+        debug_assert!(self.c[0].representation == Representation::Evaluation);
+        let c = self
+            .c
+            .iter()
+            .map(|ct| ct * rhs.poly_ntt.as_ref().expect("Missing poly_ntt"))
+            .collect_vec();
         Ciphertext {
             c,
             params: self.params.clone(),
@@ -228,6 +279,32 @@ mod tests {
             encoding_type: EncodingType::Simd,
             level: 0,
         });
+        assert_eq!(res, m1);
+    }
+
+    #[test]
+    fn ciphertext_plaintext_mul() {
+        let mut rng = thread_rng();
+        let params = Arc::new(BfvParameters::new(&[60, 60, 60], 65537, 1 << 3));
+        let sk = SecretKey::random(&params, &mut rng);
+
+        let mut m1 = params
+            .plaintext_modulus_op
+            .random_vec(params.polynomial_degree, &mut rng);
+        let mut m2 = params
+            .plaintext_modulus_op
+            .random_vec(params.polynomial_degree, &mut rng);
+        let pt1 = Plaintext::encode(&m1, &params, Encoding::simd(0));
+        let pt2 = Plaintext::encode(&m2, &params, Encoding::simd(0));
+
+        let mut ct = sk.encrypt(&pt1, &mut rng);
+        // change representation of ct to evalaution
+        ct.change_representation(&Representation::Evaluation);
+        let ct_pt = &ct * &pt2;
+
+        let res = sk.decrypt(&ct_pt).decode(Encoding::simd(0));
+        params.plaintext_modulus_op.mul_mod_fast_vec(&mut m1, &m2);
+
         assert_eq!(res, m1);
     }
 

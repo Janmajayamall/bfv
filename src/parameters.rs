@@ -9,7 +9,7 @@ use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{Pow, ToPrimitive};
 use std::sync::Arc;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Debug)]
 pub struct BfvParameters {
     pub ciphertext_moduli: Box<[u64]>,
     pub extension_moduli: Box<[u64]>,

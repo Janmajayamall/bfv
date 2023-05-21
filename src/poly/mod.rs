@@ -828,6 +828,31 @@ impl Poly {
         });
         self.context = new_ctx.clone();
     }
+
+    pub fn fma_reverse_inplace(&mut self, p1: &Poly, p2: &Poly) {
+        debug_assert!(self.context == p1.context);
+        debug_assert!(self.context == p2.context);
+
+        azip!(
+            self.coefficients.outer_iter_mut(),
+            p1.coefficients.outer_iter(),
+            p2.coefficients.outer_iter(),
+            self.context.moduli_ops.into_producer()
+        )
+        .for_each(|mut a, b, c, modqi| {
+            modqi.fma_reverse_vec(
+                a.as_slice_mut().unwrap(),
+                b.as_slice().unwrap(),
+                c.as_slice().unwrap(),
+            )
+        });
+    }
+
+    pub fn fma_reverse(&self, p1: &Poly, p2: &Poly) -> Poly {
+        let mut p = self.clone();
+        p.fma_reverse_inplace(p1, p2);
+        p
+    }
 }
 
 impl AddAssign<&Poly> for Poly {
