@@ -120,3 +120,16 @@ impl Plaintext {
         self.poly_ntt.as_ref().expect("Missing poly ntt")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_order() {
+        let params = Arc::new(BfvParameters::default(1, 1 << 3));
+        let m = vec![5; params.polynomial_degree];
+        let pt = Plaintext::encode(&m, &params, Encoding::simd(0));
+        dbg!(pt.poly_ntt);
+    }
+}

@@ -358,6 +358,7 @@ impl Poly {
         to_s_hat_inv_mods_divs_frachi: &[u64],
         to_s_hat_inv_mods_divs_fraclo: &[u64],
     ) -> Poly {
+        debug_assert!(self.representation == Representation::Coefficient);
         let mut input_offset = 0;
         let mut output_offset = 0;
         let mut input_size = 0;

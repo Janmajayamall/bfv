@@ -671,4 +671,44 @@ mod tests {
             assert_eq!(r1, r);
         }
     }
+
+    #[test]
+    fn test_perf_lazy_add() {
+        let size = 1 << 3;
+        let count = 256;
+        let mut rng = thread_rng();
+        let prime = generate_prime(60, 1 << 16, 1 << 60).unwrap();
+        let modulus = Modulus::new(prime);
+        dbg!(size, prime);
+        for _ in 0..1 {
+            let mut a = (0..count)
+                .map(|_| modulus.random_vec(size, &mut rng))
+                .collect_vec();
+            let b = (0..count)
+                .map(|_| modulus.random_vec(size, &mut rng))
+                .collect_vec();
+
+            // Note: this method overflows at addition if log(size) > 128 - log(prime)*2
+
+            let mut a_clone = a.clone();
+            let now = std::time::Instant::now();
+            let mut r1 = vec![0u64; size];
+            a_clone.iter_mut().for_each(|a0| {
+                modulus.add_mod_fast_vec(&mut r1, a0);
+            });
+            println!("time:  {:?}", now.elapsed());
+
+            let now = std::time::Instant::now();
+            let mut d = vec![0u128; size];
+            a.iter().for_each(|a0| {
+                izip!(d.iter_mut(), a0.iter()).for_each(|(r, a1)| {
+                    *r += *a1 as u128;
+                });
+            });
+            let r = modulus.barret_reduction_u128_vec(&d);
+            println!("time u128: {:?}", now.elapsed());
+
+            assert_eq!(r1, r);
+        }
+    }
 }
