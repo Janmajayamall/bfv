@@ -1,6 +1,8 @@
 use crate::modulus::Modulus;
 use crate::parameters::BfvParameters;
 use crate::poly::{Poly, Representation};
+use crate::Ciphertext;
+use std::ops::SubAssign;
 use std::sync::Arc;
 
 #[derive(PartialEq, Clone)]

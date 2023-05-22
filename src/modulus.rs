@@ -303,6 +303,13 @@ impl Modulus {
         izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.sub_mod_fast(*va, *vb));
     }
 
+    /// subracts a from b
+    ///
+    /// Adding this because we don't haave a way to express that perform a - b but consume b, not a.
+    pub fn sub_mod_fast_vec_reversed(&self, a: &mut [u64], b: &[u64]) {
+        izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.sub_mod_fast(*vb, *va));
+    }
+
     pub fn mul_mod_naive_vec(&self, a: &mut [u64], b: &[u64]) {
         izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.mul_mod_naive(*va, *vb));
     }

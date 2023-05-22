@@ -853,6 +853,19 @@ impl Poly {
         p.fma_reverse_inplace(p1, p2);
         p
     }
+
+    /// Subtract self from a
+    pub fn sub_reversed_inplace(&mut self, p: &Poly) {
+        debug_assert!(self.context == p.context);
+        azip!(
+            self.coefficients.outer_iter_mut(),
+            p.coefficients.outer_iter(),
+            self.context.moduli_ops.into_producer()
+        )
+        .for_each(|mut a, b, modqi| {
+            modqi.sub_mod_fast_vec_reversed(a.as_slice_mut().unwrap(), b.as_slice().unwrap());
+        });
+    }
 }
 
 impl AddAssign<&Poly> for Poly {

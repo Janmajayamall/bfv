@@ -146,6 +146,12 @@ impl Ciphertext {
         });
     }
 
+    pub fn sub_reversed_inplace(&mut self, p: &Poly) {
+        self.c.iter_mut().for_each(|c| {
+            c.sub_reversed_inplace(p);
+        });
+    }
+
     pub fn change_representation(&mut self, to: &Representation) {
         self.c
             .iter_mut()
@@ -212,6 +218,43 @@ impl Add<&Ciphertext> for &Ciphertext {
     }
 }
 
+impl AddAssign<&Poly> for Ciphertext {
+    fn add_assign(&mut self, rhs: &Poly) {
+        self.c.iter_mut().for_each(|a| {
+            *a += rhs;
+        });
+    }
+}
+
+impl Add<&Poly> for &Ciphertext {
+    type Output = Ciphertext;
+    fn add(self, rhs: &Poly) -> Self::Output {
+        let c = self.c.iter().map(|a| a + rhs).collect_vec();
+        Ciphertext {
+            c,
+            params: self.params.clone(),
+            level: self.level,
+        }
+    }
+}
+
+impl AddAssign<&Plaintext> for Ciphertext {
+    fn add_assign(&mut self, rhs: &Plaintext) {
+        let mut poly = rhs.to_poly();
+        poly.change_representation(self.c[0].representation.clone());
+        *self += &poly;
+    }
+}
+
+impl Add<&Plaintext> for &Ciphertext {
+    type Output = Ciphertext;
+    fn add(self, rhs: &Plaintext) -> Self::Output {
+        let mut poly = rhs.to_poly();
+        poly.change_representation(self.c[0].representation.clone());
+        self + &poly
+    }
+}
+
 impl SubAssign<&Ciphertext> for Ciphertext {
     fn sub_assign(&mut self, rhs: &Ciphertext) {
         self.c.iter_mut().zip(rhs.c.iter()).for_each(|(a, b)| {
@@ -235,6 +278,43 @@ impl Sub<&Ciphertext> for &Ciphertext {
             params: self.params.clone(),
             level: self.level,
         }
+    }
+}
+
+impl SubAssign<&Poly> for Ciphertext {
+    fn sub_assign(&mut self, rhs: &Poly) {
+        self.c.iter_mut().for_each(|a| {
+            *a -= rhs;
+        });
+    }
+}
+
+impl Sub<&Poly> for &Ciphertext {
+    type Output = Ciphertext;
+    fn sub(self, rhs: &Poly) -> Self::Output {
+        let c = self.c.iter().map(|a| a - rhs).collect_vec();
+        Ciphertext {
+            c,
+            params: self.params.clone(),
+            level: self.level,
+        }
+    }
+}
+
+impl SubAssign<&Plaintext> for Ciphertext {
+    fn sub_assign(&mut self, rhs: &Plaintext) {
+        let mut poly = rhs.to_poly();
+        poly.change_representation(self.c[0].representation.clone());
+        *self -= &poly;
+    }
+}
+
+impl Sub<&Plaintext> for &Ciphertext {
+    type Output = Ciphertext;
+    fn sub(self, rhs: &Plaintext) -> Self::Output {
+        let mut poly = rhs.to_poly();
+        poly.change_representation(self.c[0].representation.clone());
+        self - &poly
     }
 }
 
