@@ -10,7 +10,7 @@ use num_traits::{identities::One, ToPrimitive, Zero};
 use rand::{CryptoRng, RngCore};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::{
-    ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
+    ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     sync::Arc,
 };
 
@@ -858,6 +858,7 @@ impl Poly {
     /// Subtract self from a
     pub fn sub_reversed_inplace(&mut self, p: &Poly) {
         debug_assert!(self.context == p.context);
+        debug_assert!(self.representation == p.representation);
         azip!(
             self.coefficients.outer_iter_mut(),
             p.coefficients.outer_iter(),
@@ -865,6 +866,16 @@ impl Poly {
         )
         .for_each(|mut a, b, modqi| {
             modqi.sub_mod_fast_vec_reversed(a.as_slice_mut().unwrap(), b.as_slice().unwrap());
+        });
+    }
+
+    pub fn neg_assign(&mut self) {
+        azip!(
+            self.coefficients.outer_iter_mut(),
+            self.context.moduli_ops.into_producer()
+        )
+        .for_each(|mut coeffs, modqi| {
+            modqi.neg_mod_fast_vec(coeffs.as_slice_mut().unwrap());
         });
     }
 }
@@ -915,6 +926,15 @@ impl Sub<&Poly> for &Poly {
         let mut lhs = self.clone();
         lhs -= rhs;
         lhs
+    }
+}
+
+impl Neg for &Poly {
+    type Output = Poly;
+    fn neg(self) -> Self::Output {
+        let mut c = self.clone();
+        c.neg_assign();
+        c
     }
 }
 

@@ -141,6 +141,11 @@ impl Modulus {
         }
     }
 
+    pub fn neg_mod_fast(&self, a: u64) -> u64 {
+        debug_assert!(a < self.modulus);
+        self.modulus - a
+    }
+
     /// Naive modulus multiplication. Uses %
     pub const fn mul_mod_naive(&self, a: u64, b: u64) -> u64 {
         ((a as u128 * b as u128) % (self.modulus as u128)) as u64
@@ -301,6 +306,10 @@ impl Modulus {
     /// Assumes each element in vec a and b are smaller than modulus
     pub fn sub_mod_fast_vec(&self, a: &mut [u64], b: &[u64]) {
         izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.sub_mod_fast(*va, *vb));
+    }
+
+    pub fn neg_mod_fast_vec(&self, a: &mut [u64]) {
+        izip!(a.iter_mut()).for_each(|va| *va = self.neg_mod_fast(*va));
     }
 
     /// subracts a from b

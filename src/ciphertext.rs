@@ -158,9 +158,8 @@ impl Ciphertext {
     }
 
     pub fn sub_reversed_inplace(&mut self, p: &Poly) {
-        self.c.iter_mut().for_each(|c| {
-            c.sub_reversed_inplace(p);
-        });
+        self.c[0].sub_reversed_inplace(p);
+        self.c[1].neg_assign();
     }
 
     pub fn change_representation(&mut self, to: &Representation) {
@@ -179,6 +178,10 @@ impl Ciphertext {
 
     pub fn c_ref(&self) -> &[Poly] {
         &self.c
+    }
+
+    pub fn c_ref_mut(&mut self) -> &mut [Poly] {
+        &mut self.c
     }
 
     pub fn is_zero(&self) -> bool {
@@ -231,21 +234,16 @@ impl Add<&Ciphertext> for &Ciphertext {
 
 impl AddAssign<&Poly> for Ciphertext {
     fn add_assign(&mut self, rhs: &Poly) {
-        self.c.iter_mut().for_each(|a| {
-            *a += rhs;
-        });
+        self.c[0] += rhs;
     }
 }
 
 impl Add<&Poly> for &Ciphertext {
     type Output = Ciphertext;
     fn add(self, rhs: &Poly) -> Self::Output {
-        let c = self.c.iter().map(|a| a + rhs).collect_vec();
-        Ciphertext {
-            c,
-            params: self.params.clone(),
-            level: self.level,
-        }
+        let mut ct = self.clone();
+        ct += rhs;
+        ct
     }
 }
 
@@ -294,21 +292,16 @@ impl Sub<&Ciphertext> for &Ciphertext {
 
 impl SubAssign<&Poly> for Ciphertext {
     fn sub_assign(&mut self, rhs: &Poly) {
-        self.c.iter_mut().for_each(|a| {
-            *a -= rhs;
-        });
+        self.c[0] -= rhs;
     }
 }
 
 impl Sub<&Poly> for &Ciphertext {
     type Output = Ciphertext;
     fn sub(self, rhs: &Poly) -> Self::Output {
-        let c = self.c.iter().map(|a| a - rhs).collect_vec();
-        Ciphertext {
-            c,
-            params: self.params.clone(),
-            level: self.level,
-        }
+        let mut ct = self.clone();
+        ct -= rhs;
+        ct
     }
 }
 
@@ -386,6 +379,61 @@ mod tests {
     }
 
     #[test]
+    fn ciphertext_mul_lazy() {
+        let mut rng = thread_rng();
+        let params = Arc::new(BfvParameters::new(&[60, 60, 60], 65537, 1 << 15));
+        let sk = SecretKey::random(&params, &mut rng);
+
+        let m0 = rng
+            .clone()
+            .sample_iter(Uniform::new(0, params.plaintext_modulus))
+            .take(params.polynomial_degree)
+            .collect_vec();
+        let m1 = rng
+            .clone()
+            .sample_iter(Uniform::new(0, params.plaintext_modulus))
+            .take(params.polynomial_degree)
+            .collect_vec();
+        let pt0 = Plaintext::encode(&m0, &params, Encoding::simd(0));
+        let pt1 = Plaintext::encode(&m1, &params, Encoding::simd(0));
+
+        let ct0s = (0..20).map(|_| sk.encrypt(&pt0, &mut rng)).collect_vec();
+        let ct1s = (0..20).map(|_| sk.encrypt(&pt1, &mut rng)).collect_vec();
+
+        // lazy
+        let now = std::time::Instant::now();
+        let mut res_lazy = Ciphertext::zero(&params, 0);
+        izip!(ct0s.iter(), ct1s.iter()).for_each(|(c0, c1)| {
+            if res_lazy.is_zero() {
+                res_lazy = c0.multiply1_lazy(c1);
+            } else {
+                res_lazy += &c0.multiply1_lazy(c1);
+            }
+        });
+        res_lazy.scale_and_round();
+        let time_lazy = now.elapsed();
+
+        // not lazy
+        let now = std::time::Instant::now();
+        let mut res_not_lazy = Ciphertext::zero(&params, 0);
+        izip!(ct0s.iter(), ct1s.iter()).for_each(|(c0, c1)| {
+            if res_not_lazy.is_zero() {
+                res_not_lazy = c0.multiply1(c1);
+            } else {
+                res_not_lazy += &c0.multiply1(c1);
+            }
+        });
+        let time_not_lazy = now.elapsed();
+
+        println!("Time: Lazy={:?}, NotLazy={:?}", time_lazy, time_not_lazy);
+        println!(
+            "Noise: Lazy={:?}, NotLazy={:?}",
+            sk.measure_noise(&res_lazy, &mut rng),
+            sk.measure_noise(&res_not_lazy, &mut rng),
+        );
+    }
+
+    #[test]
     fn ciphertext_plaintext_mul() {
         let mut rng = thread_rng();
         let params = Arc::new(BfvParameters::new(&[60, 60, 60], 65537, 1 << 3));
@@ -411,6 +459,86 @@ mod tests {
         assert_eq!(res, m1);
     }
 
+    #[test]
+    fn ciphertext_plaintext_add() {
+        let mut rng = thread_rng();
+        let params = Arc::new(BfvParameters::default(1, 1 << 3));
+        let mut m0 = params
+            .plaintext_modulus_op
+            .random_vec(params.polynomial_degree, &mut rng);
+        let m1 = params
+            .plaintext_modulus_op
+            .random_vec(params.polynomial_degree, &mut rng);
+        let sk = SecretKey::random(&params, &mut rng);
+
+        let mut ct = sk.encrypt(
+            &Plaintext::encode(&m0, &params, Encoding::simd(0)),
+            &mut rng,
+        );
+        let pt1 = Plaintext::encode(&m1, &params, Encoding::simd(0));
+        let mut pt1_poly = pt1.to_poly();
+        pt1_poly.change_representation(Representation::Coefficient);
+
+        ct += &pt1_poly;
+
+        let res = sk.decrypt(&ct).decode(Encoding::simd(0));
+        params.plaintext_modulus_op.add_mod_fast_vec(&mut m0, &m1);
+        assert_eq!(res, m0);
+    }
+
+    #[test]
+    fn ciphertext_plaintext_sub() {
+        let mut rng = thread_rng();
+        let params = Arc::new(BfvParameters::default(1, 1 << 3));
+        let mut m0 = params
+            .plaintext_modulus_op
+            .random_vec(params.polynomial_degree, &mut rng);
+        let m1 = params
+            .plaintext_modulus_op
+            .random_vec(params.polynomial_degree, &mut rng);
+        let sk = SecretKey::random(&params, &mut rng);
+
+        let mut ct = sk.encrypt(
+            &Plaintext::encode(&m0, &params, Encoding::simd(0)),
+            &mut rng,
+        );
+        let pt1 = Plaintext::encode(&m1, &params, Encoding::simd(0));
+        let mut pt1_poly = pt1.to_poly();
+        pt1_poly.change_representation(Representation::Coefficient);
+
+        ct -= &pt1_poly;
+
+        let res = sk.decrypt(&ct).decode(Encoding::simd(0));
+        params.plaintext_modulus_op.sub_mod_fast_vec(&mut m0, &m1);
+        assert_eq!(res, m0);
+    }
+
+    #[test]
+    fn plaintext_ciphertext_sub() {
+        let mut rng = thread_rng();
+        let params = Arc::new(BfvParameters::default(1, 1 << 3));
+        let m0 = params
+            .plaintext_modulus_op
+            .random_vec(params.polynomial_degree, &mut rng);
+        let mut m1 = params
+            .plaintext_modulus_op
+            .random_vec(params.polynomial_degree, &mut rng);
+        let sk = SecretKey::random(&params, &mut rng);
+
+        let mut ct = sk.encrypt(
+            &Plaintext::encode(&m0, &params, Encoding::simd(0)),
+            &mut rng,
+        );
+        let pt1 = Plaintext::encode(&m1, &params, Encoding::simd(0));
+        let mut pt1_poly = pt1.to_poly();
+        pt1_poly.change_representation(Representation::Coefficient);
+
+        ct.sub_reversed_inplace(&pt1_poly);
+
+        let res = sk.decrypt(&ct).decode(Encoding::simd(0));
+        params.plaintext_modulus_op.sub_mod_fast_vec(&mut m1, &m0);
+        assert_eq!(res, m1);
+    }
     #[test]
     fn clone_perf() {
         let params = Arc::new(BfvParameters::new(

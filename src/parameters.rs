@@ -146,7 +146,7 @@ impl BfvParameters {
             let q_dig = poly_context.modulus_dig();
 
             // [Q]_t
-            ql_modt.push((q % plaintext_modulus).to_u64().unwrap());
+            ql_modt.push((&q % plaintext_modulus).to_u64().unwrap());
 
             // [(-t)^-1]_Q
             let neg_t_inv_modq = BigUint::from_bytes_le(
@@ -162,6 +162,7 @@ impl BfvParameters {
                 poly_context,
                 &Representation::Coefficient,
             );
+            // dbg!(&neg_t_inv_modq.coefficients);
             neg_t_inv_modq.change_representation(Representation::Evaluation);
             neg_t_inv_modql.push(neg_t_inv_modq);
         });

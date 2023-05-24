@@ -105,8 +105,14 @@ impl Plaintext {
                     &self.params.ciphertext_poly_contexts[encoding.level],
                     &Representation::Coefficient,
                 );
-                m_poly.change_representation(Representation::Evaluation);
 
+                // An alternate method to this will be to store [-t_inv]_Q
+                // and perform scalar multiplication [-t_inv]_Q with `m_poly`
+                // in coefficient form.
+                // We prefer this because `m_poly` needs to change representation
+                // to `Evaluation` anyways for encryption and it plays well with
+                // polynomial API for multiplication.
+                m_poly.change_representation(Representation::Evaluation);
                 m_poly *= &self.params.neg_t_inv_modql[encoding.level];
                 m_poly
             }
