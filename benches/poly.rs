@@ -4,7 +4,7 @@ use bfv::{
     poly::{Poly, PolyContext, Representation},
 };
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use itertools::izip;
+use itertools::{izip, Itertools};
 use ndarray::Array2;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -143,7 +143,7 @@ fn bench_poly(c: &mut Criterion) {
         let bfv_params = BfvParameters::default(15, 1 << 15);
         let q_poly = Poly::random(
             &bfv_params.ciphertext_poly_contexts[0],
-            &Representation::Evaluation,
+            &Representation::Coefficient,
             &mut rng,
         );
         group.bench_function(BenchmarkId::new("expand_crt_basis", ""), |b| {
@@ -304,6 +304,7 @@ fn bench_poly(c: &mut Criterion) {
             )
         });
     }
+
 }
 
 criterion_group!(

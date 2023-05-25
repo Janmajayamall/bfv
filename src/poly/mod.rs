@@ -438,28 +438,28 @@ impl Poly {
         debug_assert!(self.representation == Representation::Coefficient);
 
         let mut p = Poly::zero(p_context, &Representation::Coefficient);
-
+        let q_size = self.context.moduli.len();
         azip!(
             p.coefficients.axis_iter_mut(Axis(1)).into_producer(),
             self.coefficients.axis_iter(Axis(1)).into_producer()
         )
         .par_for_each(|mut p_rests, q_rests| {
+            let mut xiv = Vec::with_capacity(q_size);
             let mut nu = 0.5;
-            let xiv = izip!(
+            izip!(
                 q_rests.iter(),
                 neg_pq_hat_inv_modq.iter(),
                 neg_pq_hat_inv_modq_shoup.iter(),
                 q_inv.iter(),
                 self.context.moduli_ops.iter()
             )
-            .map(
+            .for_each(
                 |(xi, neg_pqi_hat_inv, neg_pq_hat_inv_shoup, qi_inv, modqi)| {
                     let tmp = modqi.mul_mod_shoup(*xi, *neg_pqi_hat_inv, *neg_pq_hat_inv_shoup);
+                    xiv.push(tmp);
                     nu += tmp as f64 * qi_inv;
-                    tmp
                 },
-            )
-            .collect_vec();
+            );
 
             izip!(
                 p_rests.iter_mut(),
@@ -530,24 +530,27 @@ impl Poly {
     ) -> Poly {
         debug_assert!(self.representation == Representation::Coefficient);
 
-        let mut p = Poly::zero(p_context, &Representation::Coefficient);
+        let mut p: Poly = Poly::zero(p_context, &Representation::Coefficient);
+        let q_size = self.context.moduli.len();
+        // let p_size = p_context.moduli.len();
 
         azip!(
             p.coefficients.axis_iter_mut(Axis(1)).into_producer(),
             self.coefficients.axis_iter(Axis(1)).into_producer()
         )
         .par_for_each(|mut p_rests, q_rests| {
-            let mut xi_q_hat_inv_modq = vec![];
+            let mut xi_q_hat_inv_modq = Vec::with_capacity(q_size);
             let mut nu = 0.5f64;
+            // let mut sum = Vec::with_capacity(p_size);
 
-            azip!(
-                q_rests.into_producer(),
-                q_hat_inv_modq.into_producer(),
-                q_hat_inv_modq_shoup.into_producer(),
-                q_inv.into_producer(),
-                self.context.moduli_ops.into_producer()
+            izip!(
+                q_rests.iter(),
+                q_hat_inv_modq.iter(),
+                q_hat_inv_modq_shoup.iter(),
+                q_inv.iter(),
+                self.context.moduli_ops.iter(),
             )
-            .for_each(|xi, qi_hat_inv, qi_hat_inv_shoup, q_inv, modq| {
+            .for_each(|(xi, qi_hat_inv, qi_hat_inv_shoup, q_inv, modq)| {
                 // TODO: replacing mul_mod_fast with mul_mod_shoup only increases perf by 2.8% or so. I think treasure lies somewhere else
                 let tmp = modq.mul_mod_shoup(*xi, *qi_hat_inv, *qi_hat_inv_shoup);
                 xi_q_hat_inv_modq.push(tmp);
@@ -555,23 +558,21 @@ impl Poly {
                 nu += tmp as f64 * q_inv;
             });
 
-            let alpha = alpha_modp.slice(s![nu as usize, ..]);
-
-            azip!(
-                p_rests.into_producer(),
-                q_hat_modp.outer_iter().into_producer(),
-                alpha.into_producer(),
-                p_context.moduli_ops.into_producer()
+            izip!(
+                p_rests.iter_mut(),
+                q_hat_modp.outer_iter(),
+                p_context.moduli_ops.iter(),
             )
-            .for_each(|pxj, q_hat_modpj, alpha_modpj, modpj| {
+            .enumerate()
+            .for_each(|(index, (pxj, q_hat_modpj, modpj))| {
                 let mut tmp = 0u128;
                 izip!(xi_q_hat_inv_modq.iter(), q_hat_modpj.iter()).for_each(
                     |(xi_q_hat_inv, qi_hat_modpj)| {
                         // TODO: can FMA using HEXL
-                        tmp += (*xi_q_hat_inv as u128 * *qi_hat_modpj as u128);
+                        tmp += *xi_q_hat_inv as u128 * *qi_hat_modpj as u128;
                     },
                 );
-                tmp -= *alpha_modpj as u128;
+                tmp -= *alpha_modp.get((nu as usize, index)).unwrap() as u128;
                 *pxj = modpj.barret_reduction_u128(tmp);
             });
         });
@@ -697,9 +698,10 @@ impl Poly {
 
         // TODO: the computation within each loop isn't much. Does it make sense to parallelize this by Axis(1) or shall
         // we switch to parallelizing by Axis(0)
+        let p_size = p_moduli_ops.len();
         azip!(p.axis_iter_mut(Axis(1)), q_coefficients.axis_iter(Axis(1))).par_for_each(
             |mut p_rests, q_rests| {
-                let mut sum = vec![0u128; p_moduli_ops.len()];
+                let mut sum: Vec<u128> = Vec::with_capacity(p_size);
                 izip!(
                     q_rests.iter(),
                     q_hat_inv_modq.iter(),
@@ -709,9 +711,15 @@ impl Poly {
                 .for_each(|(xi, qi_hat_inv_modqi, qi_hat_modp, modqi)| {
                     // TODO: change this to mul shoup
                     let tmp = modqi.mul_mod_fast(*xi, *qi_hat_inv_modqi);
-                    izip!(sum.iter_mut(), qi_hat_modp.iter()).for_each(|(vj, qi_hat_modpj)| {
-                        *vj += (tmp as u128 * *qi_hat_modpj as u128)
-                    });
+                    if sum.is_empty() {
+                        qi_hat_modp.iter().for_each(|qi_hat_modpj| {
+                            sum.push(tmp as u128 * *qi_hat_modpj as u128);
+                        })
+                    } else {
+                        izip!(sum.iter_mut(), qi_hat_modp.iter()).for_each(|(vj, qi_hat_modpj)| {
+                            *vj += (tmp as u128 * *qi_hat_modpj as u128)
+                        });
+                    }
                 });
 
                 izip!(p_rests.iter_mut(), sum.iter(), p_moduli_ops.iter())
@@ -757,7 +765,7 @@ impl Poly {
             p_coefficients.axis_iter(Axis(1))
         )
         .par_for_each(|mut p_to_q_rests, p_rests| {
-            let mut sum = vec![0u128; q_size];
+            let mut sum = Vec::with_capacity(q_size);
 
             // TODO: the computation within each loop isn't much. Does it make sense to parallelize this by Axis(1) or shall
             // we switch to parallelizing by Axis(0)
@@ -770,9 +778,15 @@ impl Poly {
             .for_each(|(xi, pi_hat_inv_modpi, pi_hat_modq, modpi)| {
                 // TODO: change this to mul shoup
                 let tmp = modpi.mul_mod_fast(*xi, *pi_hat_inv_modpi) as u128;
-                izip!(sum.iter_mut(), pi_hat_modq.iter()).for_each(|(vj, pi_hat_modqj)| {
-                    *vj += tmp * *pi_hat_modqj as u128;
-                });
+                if sum.is_empty() {
+                    pi_hat_modq.iter().for_each(|pi_hat_modqj| {
+                        sum.push(tmp * *pi_hat_modqj as u128);
+                    });
+                } else {
+                    izip!(sum.iter_mut(), pi_hat_modq.iter()).for_each(|(vj, pi_hat_modqj)| {
+                        *vj += tmp * *pi_hat_modqj as u128;
+                    });
+                }
             });
 
             izip!(
