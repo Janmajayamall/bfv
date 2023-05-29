@@ -565,15 +565,15 @@ impl Poly {
             )
             .enumerate()
             .for_each(|(index, (pxj, q_hat_modpj, modpj))| {
-                let mut tmp = 0u128;
-                izip!(xi_q_hat_inv_modq.iter(), q_hat_modpj.iter()).for_each(
-                    |(xi_q_hat_inv, qi_hat_modpj)| {
+                let tmp = izip!(xi_q_hat_inv_modq.iter(), q_hat_modpj.iter()).fold(
+                    0u128,
+                    |s, (xi_q_hat_inv, qi_hat_modpj)| {
                         // TODO: can FMA using HEXL
-                        tmp += *xi_q_hat_inv as u128 * *qi_hat_modpj as u128;
+                        s + (*xi_q_hat_inv as u128 * *qi_hat_modpj as u128)
                     },
                 );
-                tmp -= *alpha_modp.get((nu as usize, index)).unwrap() as u128;
                 *pxj = modpj.barret_reduction_u128(tmp);
+                *pxj = modpj.sub_mod_fast(*pxj, *alpha_modp.get((nu as usize, index)).unwrap());
             });
         });
 
