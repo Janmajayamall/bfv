@@ -532,50 +532,81 @@ impl Poly {
 
         let mut p: Poly = Poly::zero(p_context, &Representation::Coefficient);
         let q_size = self.context.moduli.len();
-        // let p_size = p_context.moduli.len();
+        let p_size = p_context.moduli.len();
 
-        azip!(
-            p.coefficients.axis_iter_mut(Axis(1)).into_producer(),
-            self.coefficients.axis_iter(Axis(1)).into_producer()
-        )
-        .par_for_each(|mut p_rests, q_rests| {
-            let mut xi_q_hat_inv_modq = Vec::with_capacity(q_size);
-            let mut nu = 0.5f64;
-            // let mut sum = Vec::with_capacity(p_size);
+        let modq_ops = self.context.moduli_ops.as_ref();
+        let modp_ops = p.context.moduli_ops.as_ref();
+        unsafe {
+            for ri in 0..self.context.degree {
+                let mut xi_q_hat_inv = Vec::with_capacity(q_size);
+                let mut nu = 0.5f64;
+                for i in 0..q_size {
+                    let tmp = modq_ops.get_unchecked(i).mul_mod_shoup(
+                        *self.coefficients.uget((i, ri)),
+                        *q_hat_inv_modq.get_unchecked(i),
+                        *q_hat_inv_modq_shoup.get_unchecked(i),
+                    );
+                    xi_q_hat_inv.push(tmp);
+                    nu += tmp as f64 * q_inv.get_unchecked(i);
+                }
 
-            izip!(
-                q_rests.iter(),
-                q_hat_inv_modq.iter(),
-                q_hat_inv_modq_shoup.iter(),
-                q_inv.iter(),
-                self.context.moduli_ops.iter(),
-            )
-            .for_each(|(xi, qi_hat_inv, qi_hat_inv_shoup, q_inv, modq)| {
-                // TODO: replacing mul_mod_fast with mul_mod_shoup only increases perf by 2.8% or so. I think treasure lies somewhere else
-                let tmp = modq.mul_mod_shoup(*xi, *qi_hat_inv, *qi_hat_inv_shoup);
-                xi_q_hat_inv_modq.push(tmp);
+                for j in 0..p_size {
+                    let mut tmp = 0u128;
+                    for i in 0..q_size {
+                        tmp += *xi_q_hat_inv.get_unchecked(i) as u128
+                            * *q_hat_modp.uget((j, i)) as u128;
+                    }
+                    let pxi = p.coefficients.uget_mut((j, ri));
+                    *pxi = modp_ops.get_unchecked(j).barret_reduction_u128(tmp);
+                    *pxi = modp_ops
+                        .get_unchecked(j)
+                        .sub_mod_fast(*pxi, *alpha_modp.uget((nu as usize, j)));
+                }
+            }
+        }
 
-                nu += tmp as f64 * q_inv;
-            });
+        // azip!(
+        //     p.coefficients.axis_iter_mut(Axis(1)).into_producer(),
+        //     self.coefficients.axis_iter(Axis(1)).into_producer()
+        // )
+        // .par_for_each(|mut p_rests, q_rests| {
+        //     let mut xi_q_hat_inv_modq = Vec::with_capacity(q_size);
+        //     let mut nu = 0.5f64;
+        //     // let mut sum = Vec::with_capacity(p_size);
 
-            izip!(
-                p_rests.iter_mut(),
-                q_hat_modp.outer_iter(),
-                p_context.moduli_ops.iter(),
-            )
-            .enumerate()
-            .for_each(|(index, (pxj, q_hat_modpj, modpj))| {
-                let tmp = izip!(xi_q_hat_inv_modq.iter(), q_hat_modpj.iter()).fold(
-                    0u128,
-                    |s, (xi_q_hat_inv, qi_hat_modpj)| {
-                        // TODO: can FMA using HEXL
-                        s + (*xi_q_hat_inv as u128 * *qi_hat_modpj as u128)
-                    },
-                );
-                *pxj = modpj.barret_reduction_u128(tmp);
-                *pxj = modpj.sub_mod_fast(*pxj, *alpha_modp.get((nu as usize, index)).unwrap());
-            });
-        });
+        //     izip!(
+        //         q_rests.iter(),
+        //         q_hat_inv_modq.iter(),
+        //         q_hat_inv_modq_shoup.iter(),
+        //         q_inv.iter(),
+        //         self.context.moduli_ops.iter(),
+        //     )
+        //     .for_each(|(xi, qi_hat_inv, qi_hat_inv_shoup, q_inv, modq)| {
+        //         // TODO: replacing mul_mod_fast with mul_mod_shoup only increases perf by 2.8% or so. I think treasure lies somewhere else
+        //         let tmp = modq.mul_mod_shoup(*xi, *qi_hat_inv, *qi_hat_inv_shoup);
+        //         xi_q_hat_inv_modq.push(tmp);
+
+        //         nu += tmp as f64 * q_inv;
+        //     });
+
+        //     izip!(
+        //         p_rests.iter_mut(),
+        //         q_hat_modp.outer_iter(),
+        //         p_context.moduli_ops.iter(),
+        //     )
+        //     .enumerate()
+        //     .for_each(|(index, (pxj, q_hat_modpj, modpj))| {
+        //         let tmp = izip!(xi_q_hat_inv_modq.iter(), q_hat_modpj.iter()).fold(
+        //             0u128,
+        //             |s, (xi_q_hat_inv, qi_hat_modpj)| {
+        //                 // TODO: can FMA using HEXL
+        //                 s + (*xi_q_hat_inv as u128 * *qi_hat_modpj as u128)
+        //             },
+        //         );
+        //         *pxj = modpj.barret_reduction_u128(tmp);
+        //         *pxj = modpj.sub_mod_fast(*pxj, *alpha_modp.get((nu as usize, index)).unwrap());
+        //     });
+        // });
 
         p
     }

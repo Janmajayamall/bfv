@@ -182,7 +182,7 @@ impl Modulus {
     /// Shoup modulur multiplication
     ///
     /// a and b should be smaller than modulus
-    pub fn mul_mod_shoup(&self, a: u64, b: u64, b_shoup: u64) -> u64 {
+    pub const fn mul_mod_shoup(&self, a: u64, b: u64, b_shoup: u64) -> u64 {
         debug_assert!(self.compute_shoup(b) == b_shoup);
         debug_assert!(a < self.modulus);
         debug_assert!(b < self.modulus);
