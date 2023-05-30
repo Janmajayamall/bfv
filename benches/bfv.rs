@@ -5,7 +5,6 @@ use bfv::{
 };
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use itertools::Itertools;
-use pprof::criterion::{Output, PProfProfiler};
 use rand::{distributions::Uniform, thread_rng, Rng};
 use std::sync::Arc;
 
@@ -47,9 +46,5 @@ fn bench_bfv(c: &mut Criterion) {
     }
 }
 
-criterion_group!(
-    name = bfv;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = bench_bfv
-);
+criterion_group!(bfv, bench_bfv);
 criterion_main!(bfv);

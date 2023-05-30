@@ -20,7 +20,6 @@ rand_chacha = "0.3.1"
 rayon = "1.7.0"
 
 [dev-dependencies]
-pprof = { version = "0.11.0", features = ["criterion", "flamegraph", "frame-pointer"]}
 criterion = "0.4"
 
 [[bench]]

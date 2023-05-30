@@ -535,7 +535,99 @@ impl Poly {
         let p_size = p_context.moduli.len();
 
         let modq_ops = self.context.moduli_ops.as_ref();
-        let modp_ops = p.context.moduli_ops.as_ref();
+        let modp_ops = p_context.moduli_ops.as_ref();
+        let degree = self.context.degree;
+
+        // // q x n
+        // let mut xi_q_hat_inv = Vec::with_capacity(q_size * degree);
+        // let uinit_xi_q_hat_inv = xi_q_hat_inv.spare_capacity_mut();
+        // let mut nu = vec![0f64; degree];
+        // unsafe {
+        //     for ri in (0..degree) {
+        //         // let n = 0.5f64;
+        //         for i in 0..q_size {
+        //             let tmp = modq_ops.get_unchecked(i).mul_mod_shoup(
+        //                 *self.coefficients.uget((i, ri)),
+        //                 *q_hat_inv_modq.get_unchecked(i),
+        //                 *q_hat_inv_modq_shoup.get_unchecked(i),
+        //             );
+        //             uinit_xi_q_hat_inv[ri + degree * i].write(tmp);
+        //             nu[ri] += tmp as f64 * q_inv.get_unchecked(i);
+        //         }
+        //     }
+        //     xi_q_hat_inv.set_len(q_size * degree);
+        // }
+
+        // // matrix multiplication
+        // // (p x q) * (q x n) -> p x n
+        // let mut p_u128: Vec<u128> = Vec::with_capacity(p_size * degree);
+
+        // unsafe {
+        //     let mut row = 0;
+        //     let mut col = 0;
+        //     loop {
+        //         if col == 0 {
+        //             (0..degree).for_each(|i| {
+        //                 std::ptr::write(
+        //                     p_u128.get_unchecked_mut(row * degree + i),
+        //                     (*q_hat_modp.uget((row, col)) as u128
+        //                         * xi_q_hat_inv[col * degree + i] as u128),
+        //                 );
+        //             });
+        //         } else {
+        //             (0..degree).for_each(|i| {
+        //                 *p_u128.get_unchecked_mut(row * degree + i) += (*q_hat_modp.uget((row, col))
+        //                     as u128
+        //                     * xi_q_hat_inv[col * degree + i] as u128);
+        //             });
+        //         }
+        //         col += 1;
+
+        //         // col_size = q_size
+        //         if col == q_size {
+        //             col = 0;
+        //             row += 1;
+        //             // row_size = p_size
+        //             if row == p_size {
+        //                 break;
+        //             }
+        //         }
+        //     }
+        //     p_u128.set_len(p_size * degree);
+        // }
+
+        // let mut p = Vec::with_capacity(p_size * degree);
+        // let uinit_p = p.spare_capacity_mut();
+        // for i in 0..p_size {
+        //     uinit_p
+        //         .iter_mut()
+        //         .zip(
+        //             modp_ops[i]
+        //                 .barret_reduction_u128_vec(&p_u128[i * p_size..i * p_size + degree])
+        //                 .iter(),
+        //         )
+        //         .for_each(|(v0, v1)| {
+        //             v0.write(*v1);
+        //         });
+        // }
+        // unsafe {
+        //     p.set_len(p_size * degree);
+        // }
+
+        // unsafe {
+        //     for ri in 0..degree {
+        //         let nv = nu[ri].ceil() as usize;
+        //         for j in 0..p_size {
+        //             p[j * degree + ri] =
+        //                 modp_ops[j].sub_mod_fast(p[j * degree + ri], *alpha_modp.uget((nv, j)));
+        //         }
+        //     }
+        // }
+
+        // let p = unsafe { Array2::from_shape_vec_unchecked((p_size, degree), p) };
+
+        // Poly::new(p, p_context, Representation::Coefficient)
+
         unsafe {
             for ri in 0..self.context.degree {
                 let mut xi_q_hat_inv = Vec::with_capacity(q_size);
@@ -564,7 +656,7 @@ impl Poly {
                 }
             }
         }
-
+        p
         // azip!(
         //     p.coefficients.axis_iter_mut(Axis(1)).into_producer(),
         //     self.coefficients.axis_iter(Axis(1)).into_producer()
@@ -607,8 +699,7 @@ impl Poly {
         //         *pxj = modpj.sub_mod_fast(*pxj, *alpha_modp.get((nu as usize, index)).unwrap());
         //     });
         // });
-
-        p
+        // p
     }
 
     pub fn fast_expand_crt_basis_p_over_q(
