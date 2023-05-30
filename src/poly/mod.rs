@@ -8,7 +8,7 @@ use num_bigint::{BigInt, BigUint};
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{identities::One, ToPrimitive, Zero};
 use rand::{CryptoRng, RngCore};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::{
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     sync::Arc,
@@ -530,175 +530,189 @@ impl Poly {
     ) -> Poly {
         debug_assert!(self.representation == Representation::Coefficient);
 
-        let mut p: Poly = Poly::zero(p_context, &Representation::Coefficient);
         let q_size = self.context.moduli.len();
         let p_size = p_context.moduli.len();
+        let degree = self.context.degree;
 
         let modq_ops = self.context.moduli_ops.as_ref();
         let modp_ops = p_context.moduli_ops.as_ref();
-        let degree = self.context.degree;
 
-        // // q x n
-        // let mut xi_q_hat_inv = Vec::with_capacity(q_size * degree);
-        // let uinit_xi_q_hat_inv = xi_q_hat_inv.spare_capacity_mut();
-        // let mut nu = vec![0f64; degree];
+        let mut p_coeffs = Array2::zeros((p_size, degree));
+        unsafe {
+            for ri in (0..degree).step_by(8) {
+                let mut xiq0 = Vec::with_capacity(q_size);
+                let mut xiq1 = Vec::with_capacity(q_size);
+                let mut xiq2 = Vec::with_capacity(q_size);
+                let mut xiq3 = Vec::with_capacity(q_size);
+                let mut xiq4 = Vec::with_capacity(q_size);
+                let mut xiq5 = Vec::with_capacity(q_size);
+                let mut xiq6 = Vec::with_capacity(q_size);
+                let mut xiq7 = Vec::with_capacity(q_size);
+
+                let mut nu0 = 0.5f64;
+                let mut nu1 = 0.5f64;
+                let mut nu2 = 0.5f64;
+                let mut nu3 = 0.5f64;
+                let mut nu4 = 0.5f64;
+                let mut nu5 = 0.5f64;
+                let mut nu6 = 0.5f64;
+                let mut nu7 = 0.5f64;
+
+                for i in 0..q_size {
+                    let mod_ref = modq_ops.get_unchecked(i);
+
+                    let tmp0 = mod_ref.mul_mod_shoup(
+                        *self.coefficients.uget((i, ri)),
+                        *q_hat_inv_modq.get_unchecked(i),
+                        *q_hat_inv_modq_shoup.get_unchecked(i),
+                    );
+                    let tmp1 = modq_ops.get_unchecked(i).mul_mod_shoup(
+                        *self.coefficients.uget((i, ri + 1)),
+                        *q_hat_inv_modq.get_unchecked(i),
+                        *q_hat_inv_modq_shoup.get_unchecked(i),
+                    );
+                    let tmp2 = modq_ops.get_unchecked(i).mul_mod_shoup(
+                        *self.coefficients.uget((i, ri + 2)),
+                        *q_hat_inv_modq.get_unchecked(i),
+                        *q_hat_inv_modq_shoup.get_unchecked(i),
+                    );
+                    let tmp3 = modq_ops.get_unchecked(i).mul_mod_shoup(
+                        *self.coefficients.uget((i, ri + 3)),
+                        *q_hat_inv_modq.get_unchecked(i),
+                        *q_hat_inv_modq_shoup.get_unchecked(i),
+                    );
+                    let tmp4 = modq_ops.get_unchecked(i).mul_mod_shoup(
+                        *self.coefficients.uget((i, ri + 4)),
+                        *q_hat_inv_modq.get_unchecked(i),
+                        *q_hat_inv_modq_shoup.get_unchecked(i),
+                    );
+                    let tmp5 = modq_ops.get_unchecked(i).mul_mod_shoup(
+                        *self.coefficients.uget((i, ri + 5)),
+                        *q_hat_inv_modq.get_unchecked(i),
+                        *q_hat_inv_modq_shoup.get_unchecked(i),
+                    );
+                    let tmp6 = modq_ops.get_unchecked(i).mul_mod_shoup(
+                        *self.coefficients.uget((i, ri + 6)),
+                        *q_hat_inv_modq.get_unchecked(i),
+                        *q_hat_inv_modq_shoup.get_unchecked(i),
+                    );
+                    let tmp7 = modq_ops.get_unchecked(i).mul_mod_shoup(
+                        *self.coefficients.uget((i, ri + 7)),
+                        *q_hat_inv_modq.get_unchecked(i),
+                        *q_hat_inv_modq_shoup.get_unchecked(i),
+                    );
+
+                    let qi = q_inv.get_unchecked(i);
+                    nu0 += tmp0 as f64 * qi;
+                    nu1 += tmp1 as f64 * qi;
+                    nu2 += tmp2 as f64 * qi;
+                    nu3 += tmp3 as f64 * qi;
+                    nu4 += tmp4 as f64 * qi;
+                    nu5 += tmp5 as f64 * qi;
+                    nu6 += tmp6 as f64 * qi;
+                    nu7 += tmp7 as f64 * qi;
+
+                    xiq0.push(tmp0);
+                    xiq1.push(tmp1);
+                    xiq2.push(tmp2);
+                    xiq3.push(tmp3);
+                    xiq4.push(tmp4);
+                    xiq5.push(tmp5);
+                    xiq6.push(tmp6);
+                    xiq7.push(tmp7);
+                }
+
+                for j in 0..p_size {
+                    let mut tmp0 = 0u128;
+                    let mut tmp1 = 0u128;
+                    let mut tmp2 = 0u128;
+                    let mut tmp3 = 0u128;
+                    let mut tmp4 = 0u128;
+                    let mut tmp5 = 0u128;
+                    let mut tmp6 = 0u128;
+                    let mut tmp7 = 0u128;
+
+                    for i in 0..q_size {
+                        let op2 = *q_hat_modp.uget((j, i)) as u128;
+
+                        tmp0 += *xiq0.get_unchecked(i) as u128 * op2;
+                        tmp1 += *xiq1.get_unchecked(i) as u128 * op2;
+                        tmp2 += *xiq2.get_unchecked(i) as u128 * op2;
+                        tmp3 += *xiq3.get_unchecked(i) as u128 * op2;
+                        tmp4 += *xiq4.get_unchecked(i) as u128 * op2;
+                        tmp5 += *xiq5.get_unchecked(i) as u128 * op2;
+                        tmp6 += *xiq6.get_unchecked(i) as u128 * op2;
+                        tmp7 += *xiq7.get_unchecked(i) as u128 * op2;
+                    }
+
+                    let modpj = modp_ops.get_unchecked(j);
+
+                    let pxi0 = p_coeffs.uget_mut((j, ri));
+                    *pxi0 = modpj.barret_reduction_u128(tmp0);
+                    *pxi0 = modpj.sub_mod_fast(*pxi0, *alpha_modp.uget((nu0 as usize, j)));
+
+                    let pxi1 = p_coeffs.uget_mut((j, ri + 1));
+                    *pxi1 = modpj.barret_reduction_u128(tmp1);
+                    *pxi1 = modpj.sub_mod_fast(*pxi1, *alpha_modp.uget((nu1 as usize, j)));
+
+                    let pxi2 = p_coeffs.uget_mut((j, ri + 2));
+                    *pxi2 = modpj.barret_reduction_u128(tmp2);
+                    *pxi2 = modpj.sub_mod_fast(*pxi2, *alpha_modp.uget((nu2 as usize, j)));
+
+                    let pxi3 = p_coeffs.uget_mut((j, ri + 3));
+                    *pxi3 = modpj.barret_reduction_u128(tmp3);
+                    *pxi3 = modpj.sub_mod_fast(*pxi3, *alpha_modp.uget((nu3 as usize, j)));
+
+                    let pxi4 = p_coeffs.uget_mut((j, ri + 4));
+                    *pxi4 = modpj.barret_reduction_u128(tmp4);
+                    *pxi4 = modpj.sub_mod_fast(*pxi4, *alpha_modp.uget((nu4 as usize, j)));
+
+                    let pxi5 = p_coeffs.uget_mut((j, ri + 5));
+                    *pxi5 = modpj.barret_reduction_u128(tmp5);
+                    *pxi5 = modpj.sub_mod_fast(*pxi5, *alpha_modp.uget((nu5 as usize, j)));
+
+                    let pxi6 = p_coeffs.uget_mut((j, ri + 6));
+                    *pxi6 = modpj.barret_reduction_u128(tmp6);
+                    *pxi6 = modpj.sub_mod_fast(*pxi6, *alpha_modp.uget((nu6 as usize, j)));
+
+                    let pxi7 = p_coeffs.uget_mut((j, ri + 7));
+                    *pxi7 = modpj.barret_reduction_u128(tmp7);
+                    *pxi7 = modpj.sub_mod_fast(*pxi7, *alpha_modp.uget((nu7 as usize, j)));
+                }
+            }
+        }
+
+        Poly::new(p_coeffs, p_context, Representation::Coefficient)
+
+        // not unrolled
         // unsafe {
-        //     for ri in (0..degree) {
-        //         // let n = 0.5f64;
+        //     for ri in 0..self.context.degree {
+        //         let mut xi_q_hat_inv = Vec::with_capacity(q_size);
+        //         let mut nu = 0.5f64;
         //         for i in 0..q_size {
         //             let tmp = modq_ops.get_unchecked(i).mul_mod_shoup(
         //                 *self.coefficients.uget((i, ri)),
         //                 *q_hat_inv_modq.get_unchecked(i),
         //                 *q_hat_inv_modq_shoup.get_unchecked(i),
         //             );
-        //             uinit_xi_q_hat_inv[ri + degree * i].write(tmp);
-        //             nu[ri] += tmp as f64 * q_inv.get_unchecked(i);
+        //             xi_q_hat_inv.push(tmp);
+        //             nu += tmp as f64 * q_inv.get_unchecked(i);
         //         }
-        //     }
-        //     xi_q_hat_inv.set_len(q_size * degree);
-        // }
 
-        // // matrix multiplication
-        // // (p x q) * (q x n) -> p x n
-        // let mut p_u128: Vec<u128> = Vec::with_capacity(p_size * degree);
-
-        // unsafe {
-        //     let mut row = 0;
-        //     let mut col = 0;
-        //     loop {
-        //         if col == 0 {
-        //             (0..degree).for_each(|i| {
-        //                 std::ptr::write(
-        //                     p_u128.get_unchecked_mut(row * degree + i),
-        //                     (*q_hat_modp.uget((row, col)) as u128
-        //                         * xi_q_hat_inv[col * degree + i] as u128),
-        //                 );
-        //             });
-        //         } else {
-        //             (0..degree).for_each(|i| {
-        //                 *p_u128.get_unchecked_mut(row * degree + i) += (*q_hat_modp.uget((row, col))
-        //                     as u128
-        //                     * xi_q_hat_inv[col * degree + i] as u128);
-        //             });
-        //         }
-        //         col += 1;
-
-        //         // col_size = q_size
-        //         if col == q_size {
-        //             col = 0;
-        //             row += 1;
-        //             // row_size = p_size
-        //             if row == p_size {
-        //                 break;
-        //             }
-        //         }
-        //     }
-        //     p_u128.set_len(p_size * degree);
-        // }
-
-        // let mut p = Vec::with_capacity(p_size * degree);
-        // let uinit_p = p.spare_capacity_mut();
-        // for i in 0..p_size {
-        //     uinit_p
-        //         .iter_mut()
-        //         .zip(
-        //             modp_ops[i]
-        //                 .barret_reduction_u128_vec(&p_u128[i * p_size..i * p_size + degree])
-        //                 .iter(),
-        //         )
-        //         .for_each(|(v0, v1)| {
-        //             v0.write(*v1);
-        //         });
-        // }
-        // unsafe {
-        //     p.set_len(p_size * degree);
-        // }
-
-        // unsafe {
-        //     for ri in 0..degree {
-        //         let nv = nu[ri].ceil() as usize;
         //         for j in 0..p_size {
-        //             p[j * degree + ri] =
-        //                 modp_ops[j].sub_mod_fast(p[j * degree + ri], *alpha_modp.uget((nv, j)));
+        //             let mut tmp = 0u128;
+        //             for i in 0..q_size {
+        //                 tmp += *xi_q_hat_inv.get_unchecked(i) as u128
+        //                     * *q_hat_modp.uget((j, i)) as u128;
+        //             }
+        //             let pxi = p.coefficients.uget_mut((j, ri));
+        //             *pxi = modp_ops.get_unchecked(j).barret_reduction_u128(tmp);
+        //             *pxi = modp_ops
+        //                 .get_unchecked(j)
+        //                 .sub_mod_fast(*pxi, *alpha_modp.uget((nu as usize, j)));
         //         }
         //     }
         // }
-
-        // let p = unsafe { Array2::from_shape_vec_unchecked((p_size, degree), p) };
-
-        // Poly::new(p, p_context, Representation::Coefficient)
-
-        unsafe {
-            for ri in 0..self.context.degree {
-                let mut xi_q_hat_inv = Vec::with_capacity(q_size);
-                let mut nu = 0.5f64;
-                for i in 0..q_size {
-                    let tmp = modq_ops.get_unchecked(i).mul_mod_shoup(
-                        *self.coefficients.uget((i, ri)),
-                        *q_hat_inv_modq.get_unchecked(i),
-                        *q_hat_inv_modq_shoup.get_unchecked(i),
-                    );
-                    xi_q_hat_inv.push(tmp);
-                    nu += tmp as f64 * q_inv.get_unchecked(i);
-                }
-
-                for j in 0..p_size {
-                    let mut tmp = 0u128;
-                    for i in 0..q_size {
-                        tmp += *xi_q_hat_inv.get_unchecked(i) as u128
-                            * *q_hat_modp.uget((j, i)) as u128;
-                    }
-                    let pxi = p.coefficients.uget_mut((j, ri));
-                    *pxi = modp_ops.get_unchecked(j).barret_reduction_u128(tmp);
-                    *pxi = modp_ops
-                        .get_unchecked(j)
-                        .sub_mod_fast(*pxi, *alpha_modp.uget((nu as usize, j)));
-                }
-            }
-        }
-        p
-        // azip!(
-        //     p.coefficients.axis_iter_mut(Axis(1)).into_producer(),
-        //     self.coefficients.axis_iter(Axis(1)).into_producer()
-        // )
-        // .par_for_each(|mut p_rests, q_rests| {
-        //     let mut xi_q_hat_inv_modq = Vec::with_capacity(q_size);
-        //     let mut nu = 0.5f64;
-        //     // let mut sum = Vec::with_capacity(p_size);
-
-        //     izip!(
-        //         q_rests.iter(),
-        //         q_hat_inv_modq.iter(),
-        //         q_hat_inv_modq_shoup.iter(),
-        //         q_inv.iter(),
-        //         self.context.moduli_ops.iter(),
-        //     )
-        //     .for_each(|(xi, qi_hat_inv, qi_hat_inv_shoup, q_inv, modq)| {
-        //         // TODO: replacing mul_mod_fast with mul_mod_shoup only increases perf by 2.8% or so. I think treasure lies somewhere else
-        //         let tmp = modq.mul_mod_shoup(*xi, *qi_hat_inv, *qi_hat_inv_shoup);
-        //         xi_q_hat_inv_modq.push(tmp);
-
-        //         nu += tmp as f64 * q_inv;
-        //     });
-
-        //     izip!(
-        //         p_rests.iter_mut(),
-        //         q_hat_modp.outer_iter(),
-        //         p_context.moduli_ops.iter(),
-        //     )
-        //     .enumerate()
-        //     .for_each(|(index, (pxj, q_hat_modpj, modpj))| {
-        //         let tmp = izip!(xi_q_hat_inv_modq.iter(), q_hat_modpj.iter()).fold(
-        //             0u128,
-        //             |s, (xi_q_hat_inv, qi_hat_modpj)| {
-        //                 // TODO: can FMA using HEXL
-        //                 s + (*xi_q_hat_inv as u128 * *qi_hat_modpj as u128)
-        //             },
-        //         );
-        //         *pxj = modpj.barret_reduction_u128(tmp);
-        //         *pxj = modpj.sub_mod_fast(*pxj, *alpha_modp.get((nu as usize, index)).unwrap());
-        //     });
-        // });
         // p
     }
 
@@ -1740,3 +1754,100 @@ mod tests {
         dbg!(arr.shape());
     }
 }
+
+// Cache
+//   unsafe {
+//             // for ri in (0..10).into_par_iter() {
+
+//             // }
+
+//             for ri in 0..degree {
+//                 let mut xiq0 = Vec::with_capacity(q_size);
+//                 let mut xiq1 = Vec::with_capacity(q_size);
+//                 let mut xiq2 = Vec::with_capacity(q_size);
+//                 let mut xiq3 = Vec::with_capacity(q_size);
+
+//                 let mut nu0 = 0.5f64;
+//                 let mut nu1 = 0.5f64;
+//                 let mut nu2 = 0.5f64;
+//                 let mut nu3 = 0.5f64;
+
+//                 for i in 0..q_size {
+//                     let mod_ref = modq_ops.get_unchecked(i);
+
+//                     let tmp0 = mod_ref.mul_mod_shoup(
+//                         *self.coefficients.uget((i, ri)),
+//                         *q_hat_inv_modq.get_unchecked(i),
+//                         *q_hat_inv_modq_shoup.get_unchecked(i),
+//                     );
+//                     let tmp1 = modq_ops.get_unchecked(i).mul_mod_shoup(
+//                         *self.coefficients.uget((i, ri + 1)),
+//                         *q_hat_inv_modq.get_unchecked(i),
+//                         *q_hat_inv_modq_shoup.get_unchecked(i),
+//                     );
+//                     let tmp2 = modq_ops.get_unchecked(i).mul_mod_shoup(
+//                         *self.coefficients.uget((i, ri + 2)),
+//                         *q_hat_inv_modq.get_unchecked(i),
+//                         *q_hat_inv_modq_shoup.get_unchecked(i),
+//                     );
+//                     let tmp3 = modq_ops.get_unchecked(i).mul_mod_shoup(
+//                         *self.coefficients.uget((i, ri + 3)),
+//                         *q_hat_inv_modq.get_unchecked(i),
+//                         *q_hat_inv_modq_shoup.get_unchecked(i),
+//                     );
+
+//                     nu0 += tmp0 as f64 * q_inv.get_unchecked(i);
+//                     nu1 += tmp1 as f64 * q_inv.get_unchecked(i);
+//                     nu2 += tmp2 as f64 * q_inv.get_unchecked(i);
+//                     nu3 += tmp3 as f64 * q_inv.get_unchecked(i);
+
+//                     xiq0.push(tmp0);
+//                     xiq1.push(tmp1);
+//                     xiq2.push(tmp2);
+//                     xiq3.push(tmp3);
+//                 }
+
+//                 for j in 0..p_size {
+//                     let mut tmp0 = 0u128;
+//                     let mut tmp1 = 0u128;
+//                     let mut tmp2 = 0u128;
+//                     let mut tmp3 = 0u128;
+
+//                     for i in 0..q_size {
+//                         let op2 = *q_hat_modp.uget((j, i)) as u128;
+
+//                         tmp0 += *xiq0.get_unchecked(i) as u128 * op2;
+//                         tmp1 += *xiq1.get_unchecked(i) as u128 * op2;
+//                         tmp2 += *xiq2.get_unchecked(i) as u128 * op2;
+//                         tmp3 += *xiq3.get_unchecked(i) as u128 * op2;
+//                     }
+
+//                     let index = j * degree + ri;
+//                     let pxi0 = p_coeffs.get_unchecked_mut(index);
+//                     std::ptr::write(pxi0, modp_ops.get_unchecked(j).barret_reduction_u128(tmp0));
+//                     *pxi0 = modp_ops
+//                         .get_unchecked(j)
+//                         .sub_mod_fast(*pxi0, *alpha_modp.uget((nu0 as usize, j)));
+
+//                     let pxi1 = p_coeffs.get_unchecked_mut(index + 1);
+//                     std::ptr::write(pxi1, modp_ops.get_unchecked(j).barret_reduction_u128(tmp1));
+//                     *pxi1 = modp_ops
+//                         .get_unchecked(j)
+//                         .sub_mod_fast(*pxi1, *alpha_modp.uget((nu1 as usize, j)));
+
+//                     let pxi2 = p_coeffs.get_unchecked_mut(index + 2);
+//                     std::ptr::write(pxi2, modp_ops.get_unchecked(j).barret_reduction_u128(tmp2));
+//                     *pxi2 = modp_ops
+//                         .get_unchecked(j)
+//                         .sub_mod_fast(*pxi2, *alpha_modp.uget((nu2 as usize, j)));
+
+//                     let pxi3 = p_coeffs.get_unchecked_mut(index + 3);
+//                     std::ptr::write(pxi3, modp_ops.get_unchecked(j).barret_reduction_u128(tmp3));
+//                     *pxi3 = modp_ops
+//                         .get_unchecked(j)
+//                         .sub_mod_fast(*pxi3, *alpha_modp.uget((nu3 as usize, j)));
+//                 }
+//             }
+
+//             p_coeffs.set_len(p_size * degree);
+//         }
