@@ -1,5 +1,6 @@
 use crate::parameters::BfvParameters;
 use crate::poly::{Poly, Representation};
+use crate::warn;
 use crate::Plaintext;
 use itertools::Itertools;
 use ndarray::azip;
@@ -192,6 +193,10 @@ impl Ciphertext {
 impl Mul<&Plaintext> for &Ciphertext {
     type Output = Ciphertext;
     fn mul(self, rhs: &Plaintext) -> Self::Output {
+        warn!(
+            self.c[0].representation != Representation::Evaluation,
+            "Ciphertext must be in Evaluation form for Plaintext multiplication"
+        );
         debug_assert!(self.c[0].representation == Representation::Evaluation);
         let c = self
             .c
