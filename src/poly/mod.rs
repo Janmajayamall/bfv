@@ -541,30 +541,17 @@ impl Poly {
         let modp_ops = p_context.moduli_ops.as_ref();
 
         let mut p_coeffs = Array2::zeros((p_size, degree));
+        // let (p0, p1) = p_coeffs.view_mut().split_at(Axis(1), 10);
+        // (0..10).into_par_iter().for_each(|_| {
+        //     // p_coeffs.slice_mut(s![..3, ..]);
+        // });
+
         unsafe {
             for ri in (0..degree).step_by(8) {
-                // let mut xiq0 = Vec::with_capacity(q_size);
-                // let mut xiq1 = Vec::with_capacity(q_size);
-                // let mut xiq2 = Vec::with_capacity(q_size);
-                // let mut xiq3 = Vec::with_capacity(q_size);
-                // let mut xiq4 = Vec::with_capacity(q_size);
-                // let mut xiq5 = Vec::with_capacity(q_size);
-                // let mut xiq6 = Vec::with_capacity(q_size);
-                // let mut xiq7 = Vec::with_capacity(q_size);
-
                 seq!(N in 0..8{
                     let mut xiq~N = Vec::with_capacity(q_size);
                     let mut nu~N = 0.5f64;
                 });
-
-                // let mut nu0 = 0.5f64;
-                // let mut nu1 = 0.5f64;
-                // let mut nu2 = 0.5f64;
-                // let mut nu3 = 0.5f64;
-                // let mut nu4 = 0.5f64;
-                // let mut nu5 = 0.5f64;
-                // let mut nu6 = 0.5f64;
-                // let mut nu7 = 0.5f64;
 
                 for i in 0..q_size {
                     let mod_ref = modq_ops.get_unchecked(i);
@@ -579,78 +566,9 @@ impl Poly {
 
                         xiq~N.push(tmp~N);
                     });
-
-                    // let tmp0 = mod_ref.mul_mod_shoup(
-                    //     *self.coefficients.uget((i, ri)),
-                    //     *q_hat_inv_modq.get_unchecked(i),
-                    //     *q_hat_inv_modq_shoup.get_unchecked(i),
-                    // );
-                    // let tmp1 = modq_ops.get_unchecked(i).mul_mod_shoup(
-                    //     *self.coefficients.uget((i, ri + 1)),
-                    //     *q_hat_inv_modq.get_unchecked(i),
-                    //     *q_hat_inv_modq_shoup.get_unchecked(i),
-                    // );
-                    // let tmp2 = modq_ops.get_unchecked(i).mul_mod_shoup(
-                    //     *self.coefficients.uget((i, ri + 2)),
-                    //     *q_hat_inv_modq.get_unchecked(i),
-                    //     *q_hat_inv_modq_shoup.get_unchecked(i),
-                    // );
-                    // let tmp3 = modq_ops.get_unchecked(i).mul_mod_shoup(
-                    //     *self.coefficients.uget((i, ri + 3)),
-                    //     *q_hat_inv_modq.get_unchecked(i),
-                    //     *q_hat_inv_modq_shoup.get_unchecked(i),
-                    // );
-                    // let tmp4 = modq_ops.get_unchecked(i).mul_mod_shoup(
-                    //     *self.coefficients.uget((i, ri + 4)),
-                    //     *q_hat_inv_modq.get_unchecked(i),
-                    //     *q_hat_inv_modq_shoup.get_unchecked(i),
-                    // );
-                    // let tmp5 = modq_ops.get_unchecked(i).mul_mod_shoup(
-                    //     *self.coefficients.uget((i, ri + 5)),
-                    //     *q_hat_inv_modq.get_unchecked(i),
-                    //     *q_hat_inv_modq_shoup.get_unchecked(i),
-                    // );
-                    // let tmp6 = modq_ops.get_unchecked(i).mul_mod_shoup(
-                    //     *self.coefficients.uget((i, ri + 6)),
-                    //     *q_hat_inv_modq.get_unchecked(i),
-                    //     *q_hat_inv_modq_shoup.get_unchecked(i),
-                    // );
-                    // let tmp7 = modq_ops.get_unchecked(i).mul_mod_shoup(
-                    //     *self.coefficients.uget((i, ri + 7)),
-                    //     *q_hat_inv_modq.get_unchecked(i),
-                    //     *q_hat_inv_modq_shoup.get_unchecked(i),
-                    // );
-
-                    // let qi = q_inv.get_unchecked(i);
-                    // nu0 += tmp0 as f64 * qi;
-                    // nu1 += tmp1 as f64 * qi;
-                    // nu2 += tmp2 as f64 * qi;
-                    // nu3 += tmp3 as f64 * qi;
-                    // nu4 += tmp4 as f64 * qi;
-                    // nu5 += tmp5 as f64 * qi;
-                    // nu6 += tmp6 as f64 * qi;
-                    // nu7 += tmp7 as f64 * qi;
-
-                    // xiq0.push(tmp0);
-                    // xiq1.push(tmp1);
-                    // xiq2.push(tmp2);
-                    // xiq3.push(tmp3);
-                    // xiq4.push(tmp4);
-                    // xiq5.push(tmp5);
-                    // xiq6.push(tmp6);
-                    // xiq7.push(tmp7);
                 }
 
                 for j in 0..p_size {
-                    // let mut tmp0 = 0u128;
-                    // let mut tmp1 = 0u128;
-                    // let mut tmp2 = 0u128;
-                    // let mut tmp3 = 0u128;
-                    // let mut tmp4 = 0u128;
-                    // let mut tmp5 = 0u128;
-                    // let mut tmp6 = 0u128;
-                    // let mut tmp7 = 0u128;
-
                     seq!(N in 0..8{
                         let mut tmp~N = 0u128;
                     });
@@ -662,15 +580,6 @@ impl Poly {
                             tmp~N += *xiq~N.get_unchecked(i) as u128 * op2;
 
                         });
-
-                        // tmp0 += *xiq0.get_unchecked(i) as u128 * op2;
-                        // tmp1 += *xiq1.get_unchecked(i) as u128 * op2;
-                        // tmp2 += *xiq2.get_unchecked(i) as u128 * op2;
-                        // tmp3 += *xiq3.get_unchecked(i) as u128 * op2;
-                        // tmp4 += *xiq4.get_unchecked(i) as u128 * op2;
-                        // tmp5 += *xiq5.get_unchecked(i) as u128 * op2;
-                        // tmp6 += *xiq6.get_unchecked(i) as u128 * op2;
-                        // tmp7 += *xiq7.get_unchecked(i) as u128 * op2;
                     }
 
                     let modpj = modp_ops.get_unchecked(j);
@@ -681,74 +590,11 @@ impl Poly {
                         *pxi~N = modpj.sub_mod_fast(*pxi~N, *alpha_modp.uget((nu~N as usize, j)));
 
                     });
-
-                    // let pxi0 = p_coeffs.uget_mut((j, ri));
-                    // *pxi0 = modpj.barret_reduction_u128(tmp0);
-                    // *pxi0 = modpj.sub_mod_fast(*pxi0, *alpha_modp.uget((nu0 as usize, j)));
-
-                    // let pxi1 = p_coeffs.uget_mut((j, ri + 1));
-                    // *pxi1 = modpj.barret_reduction_u128(tmp1);
-                    // *pxi1 = modpj.sub_mod_fast(*pxi1, *alpha_modp.uget((nu1 as usize, j)));
-
-                    // let pxi2 = p_coeffs.uget_mut((j, ri + 2));
-                    // *pxi2 = modpj.barret_reduction_u128(tmp2);
-                    // *pxi2 = modpj.sub_mod_fast(*pxi2, *alpha_modp.uget((nu2 as usize, j)));
-
-                    // let pxi3 = p_coeffs.uget_mut((j, ri + 3));
-                    // *pxi3 = modpj.barret_reduction_u128(tmp3);
-                    // *pxi3 = modpj.sub_mod_fast(*pxi3, *alpha_modp.uget((nu3 as usize, j)));
-
-                    // let pxi4 = p_coeffs.uget_mut((j, ri + 4));
-                    // *pxi4 = modpj.barret_reduction_u128(tmp4);
-                    // *pxi4 = modpj.sub_mod_fast(*pxi4, *alpha_modp.uget((nu4 as usize, j)));
-
-                    // let pxi5 = p_coeffs.uget_mut((j, ri + 5));
-                    // *pxi5 = modpj.barret_reduction_u128(tmp5);
-                    // *pxi5 = modpj.sub_mod_fast(*pxi5, *alpha_modp.uget((nu5 as usize, j)));
-
-                    // let pxi6 = p_coeffs.uget_mut((j, ri + 6));
-                    // *pxi6 = modpj.barret_reduction_u128(tmp6);
-                    // *pxi6 = modpj.sub_mod_fast(*pxi6, *alpha_modp.uget((nu6 as usize, j)));
-
-                    // let pxi7 = p_coeffs.uget_mut((j, ri + 7));
-                    // *pxi7 = modpj.barret_reduction_u128(tmp7);
-                    // *pxi7 = modpj.sub_mod_fast(*pxi7, *alpha_modp.uget((nu7 as usize, j)));
                 }
             }
         }
 
         Poly::new(p_coeffs, p_context, Representation::Coefficient)
-
-        // not unrolled
-        // unsafe {
-        //     for ri in 0..self.context.degree {
-        //         let mut xi_q_hat_inv = Vec::with_capacity(q_size);
-        //         let mut nu = 0.5f64;
-        //         for i in 0..q_size {
-        //             let tmp = modq_ops.get_unchecked(i).mul_mod_shoup(
-        //                 *self.coefficients.uget((i, ri)),
-        //                 *q_hat_inv_modq.get_unchecked(i),
-        //                 *q_hat_inv_modq_shoup.get_unchecked(i),
-        //             );
-        //             xi_q_hat_inv.push(tmp);
-        //             nu += tmp as f64 * q_inv.get_unchecked(i);
-        //         }
-
-        //         for j in 0..p_size {
-        //             let mut tmp = 0u128;
-        //             for i in 0..q_size {
-        //                 tmp += *xi_q_hat_inv.get_unchecked(i) as u128
-        //                     * *q_hat_modp.uget((j, i)) as u128;
-        //             }
-        //             let pxi = p.coefficients.uget_mut((j, ri));
-        //             *pxi = modp_ops.get_unchecked(j).barret_reduction_u128(tmp);
-        //             *pxi = modp_ops
-        //                 .get_unchecked(j)
-        //                 .sub_mod_fast(*pxi, *alpha_modp.uget((nu as usize, j)));
-        //         }
-        //     }
-        // }
-        // p
     }
 
     pub fn fast_expand_crt_basis_p_over_q(
