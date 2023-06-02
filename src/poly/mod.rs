@@ -548,8 +548,9 @@ impl Poly {
 
         unsafe {
             for ri in (0..degree).step_by(8) {
+                let mut xiq = Vec::with_capacity(q_size * 8);
                 seq!(N in 0..8{
-                    let mut xiq~N = Vec::with_capacity(q_size);
+                    // let mut xiq~N = Vec::with_capacity(q_size);
                     let mut nu~N = 0.5f64;
                 });
 
@@ -564,11 +565,13 @@ impl Poly {
 
                         nu~N += tmp~N as f64 * q_inv.get_unchecked(i);
 
-                        xiq~N.push(tmp~N);
+                        xiq.push(tmp~N);
                     });
                 }
 
                 for j in 0..p_size {
+                    // Why not set `tmp` as a vec of u128? Apparently calling `drop_in_place` afterwards on
+                    // `tmp` if it were a vec of u128s is more expensive than using tmp as 8 different variables.
                     seq!(N in 0..8{
                         let mut tmp~N = 0u128;
                     });
@@ -577,7 +580,7 @@ impl Poly {
                         let op2 = *q_hat_modp.uget((j, i)) as u128;
 
                         seq!(N in 0..8 {
-                            tmp~N += *xiq~N.get_unchecked(i) as u128 * op2;
+                            tmp~N += *xiq.get_unchecked(i * 8 + N) as u128 * op2;
 
                         });
                     }
