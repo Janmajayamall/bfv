@@ -7,7 +7,7 @@ use ndarray::{azip, s, Array2, ArrayView2, Axis, IntoNdProducer};
 use num_bigint::{BigInt, BigUint};
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{identities::One, ToPrimitive, Zero};
-use rand::{CryptoRng, RngCore};
+use rand::{seq, CryptoRng, RngCore};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use seq_macro::seq;
 use std::{
@@ -366,61 +366,77 @@ impl Poly {
         let mut input_offset = 0;
         let mut output_offset = 0;
         let mut input_size = 0;
+        let mut output_size = 0;
         if out_context == p_context {
             input_offset = p_context.moduli.len();
             input_size = q_context.moduli.len();
+            output_size = p_context.moduli.len();
         } else {
             output_offset = p_context.moduli.len();
             input_size = p_context.moduli.len();
+            output_size = q_context.moduli.len();
         }
 
-        let mut o = Poly::zero(out_context, &Representation::Coefficient);
+        let degree = self.context.degree;
+        let modos = out_context.moduli_ops.as_ref();
 
-        azip!(
-            self.coefficients.axis_iter(Axis(1)).into_producer(),
-            o.coefficients.axis_iter_mut(Axis(1)).into_producer()
-        )
-        .par_for_each(|pq_rests, mut o_rests| {
-            let mut frac = U192::ZERO;
-            izip!(
-                pq_rests
-                    .slice(s![input_offset..input_offset + input_size])
-                    .iter(),
-                to_s_hat_inv_mods_divs_frachi.iter(),
-                to_s_hat_inv_mods_divs_fraclo.iter()
-            )
-            .for_each(|(xi, frac_hi, frac_lo)| {
-                let lo = *xi as u128 * *frac_lo as u128;
-                let hi = (*xi as u128 * *frac_hi as u128) + (lo >> 64);
-                frac =
-                    frac.wrapping_add(&U192::from_words([lo as u64, hi as u64, (hi >> 64) as u64]));
-            });
+        let mut o_coeffs = Array2::<u64>::uninit((output_size, degree));
+        unsafe {
+            for ri in (0..degree).step_by(8) {
+                seq!(N in 0..8 {
+                    let mut frac~N = U192::ZERO;
+                });
 
-            let frac = frac.shr_vartime(127).as_words()[0] as u128;
+                for i in 0..input_size {
+                    let fhi = *to_s_hat_inv_mods_divs_frachi.get_unchecked(i) as u128;
+                    let flo = *to_s_hat_inv_mods_divs_fraclo.get_unchecked(i) as u128;
 
-            // let mut now = std::time::Instant::now();
-            unsafe {
-                let input = pq_rests.slice(s![input_offset..input_offset + input_size]);
-                for i in 0..o_rests.len() {
-                    let modo = out_context.moduli_ops.get_unchecked(i);
+                    seq!(N in 0..8 {
+                        let xi = *self.coefficients.uget((i + input_offset, ri+N));
+                        let lo = xi as u128 * flo;
+                        let hi = xi as u128 * fhi + (lo >> 64);
+                        frac~N = frac~N.wrapping_add(&U192::from_words([
+                            lo as u64,
+                            hi as u64,
+                            (hi >> 64) as u64,
+                        ]));
+                    });
+                }
 
-                    let mut s = frac;
-                    for j in 0..input.len() {
-                        s += *input.get(j).unwrap() as u128
-                            * *to_s_hat_inv_mods_divs_modo.get((i, j)).unwrap() as u128;
+                seq!(N in 0..8 {
+                    let frac~N = frac~N.shr_vartime(127).as_words()[0] as u128;
+                });
+
+                for j in 0..output_size {
+                    seq!(N in 0..8 {
+                        let mut tmp~N = frac~N;
+                    });
+
+                    for i in 0..input_size {
+                        let op = *to_s_hat_inv_mods_divs_modo.uget((j, i)) as u128;
+
+                        seq!(N in 0..8 {
+                            tmp~N += *self.coefficients.uget((i + input_offset, ri+N)) as u128 * op;
+                        });
                     }
 
-                    s += *pq_rests.get(output_offset + i).unwrap() as u128
-                        * *to_s_hat_inv_mods_divs_modo.get((i, input_size)).unwrap() as u128;
+                    let modoj = modos.get_unchecked(j);
 
-                    let oxi = o_rests.get_mut(i).unwrap();
-                    *oxi = modo.barret_reduction_u128(s);
+                    let op = *to_s_hat_inv_mods_divs_modo.uget((j, input_size)) as u128;
+
+                    seq!(N in 0..8 {
+                        tmp~N += *self.coefficients.uget((j + output_offset, ri+N)) as u128 * op;
+                        let pxj = modoj.barret_reduction_u128(tmp~N);
+                        o_coeffs.uget_mut((j, ri+N)).write(pxj);
+                    });
                 }
             }
-            // println!("inner time1: {:?}", now.elapsed());
-        });
+        }
 
-        o
+        unsafe {
+            let o_coeffs = o_coeffs.assume_init();
+            return Poly::new(o_coeffs, out_context, Representation::Coefficient);
+        }
     }
 
     /// Given a polynomial in context with moduli Q returns a polynomial in context with moduli P by calculating [round(P/Q([poly]_Q))]_P

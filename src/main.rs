@@ -40,14 +40,35 @@ fn fast_conv_p_over_q() {
     }
 }
 
+fn scale_and_round() {
+    let mut rng = thread_rng();
+    let bfv_params = BfvParameters::default(15, 1 << 15);
 
+    let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
+    let p_context = bfv_params.extension_poly_contexts[0].clone();
+    let pq_context = bfv_params.pq_poly_contexts[0].clone();
+
+    let pq_poly = Poly::random(&pq_context, &Representation::Coefficient, &mut rng);
+
+    for _ in 0..10000 {
+        let _ = pq_poly.scale_and_round(
+            &q_context,
+            &p_context,
+            &q_context,
+            &bfv_params.tql_p_hat_inv_modp_divp_modql[0],
+            &bfv_params.tql_p_hat_inv_modp_divp_frac_hi[0],
+            &bfv_params.tql_p_hat_inv_modp_divp_frac_lo[0],
+        );
+    }
+}
 
 fn main() {
     rayon::ThreadPoolBuilder::new()
         .num_threads(1)
         .build_global()
         .unwrap();
-    switch_crt_basis();
+    // switch_crt_basis();
+    scale_and_round();
     // fast_conv_p_over_q();
     // let mut rng = thread_rng();
     // let params = Arc::new(BfvParameters::new(
