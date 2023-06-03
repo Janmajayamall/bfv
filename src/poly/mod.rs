@@ -452,7 +452,8 @@ impl Poly {
         unsafe {
             //
             for ri in (0..degree).step_by(8) {
-                let mut xiv = Vec::with_capacity(q_size);
+                let mut xiv = Vec::with_capacity(q_size * 8);
+                let uninit_xiv = xiv.spare_capacity_mut();
 
                 seq!(N in 0..8 {
                     let mut nu~N = 0.5f64;
@@ -466,10 +467,11 @@ impl Poly {
                     seq!(N in 0..8 {
                         let tmp~N = modqi.mul_mod_shoup(*self.coefficients.uget((i, ri+N)), op, op_shoup);
                         nu~N += tmp~N as f64 * qi_inv;
-                        xiv.push(tmp~N);
+                        uninit_xiv.get_unchecked_mut(i*8+N).write(tmp~N);
                     });
                 }
 
+                xiv.set_len(q_size * 8);
                 seq!(N in 0..8 {
                     let nu~N = nu~N as u64;
                 });
@@ -519,7 +521,7 @@ impl Poly {
         let modq_ops = self.context.moduli_ops.as_ref();
         let modp_ops = p_context.moduli_ops.as_ref();
 
-        let mut p_coeffs = Array2::zeros((p_size, degree));
+        let mut p_coeffs = Array2::uninit((p_size, degree));
         // let (p0, p1) = p_coeffs.view_mut().split_at(Axis(1), 10);
         // (0..10).into_par_iter().for_each(|_| {
         //     // p_coeffs.slice_mut(s![..3, ..]);
@@ -528,6 +530,8 @@ impl Poly {
         unsafe {
             for ri in (0..degree).step_by(8) {
                 let mut xiq = Vec::with_capacity(q_size * 8);
+                let uninit = xiq.spare_capacity_mut();
+
                 seq!(N in 0..8{
                     // let mut xiq~N = Vec::with_capacity(q_size);
                     let mut nu~N = 0.5f64;
@@ -535,18 +539,20 @@ impl Poly {
 
                 for i in 0..q_size {
                     let mod_ref = modq_ops.get_unchecked(i);
-
+                    let op = *q_hat_inv_modq.get_unchecked(i);
+                    let op_shoup = *q_hat_inv_modq_shoup.get_unchecked(i);
                     seq!(N in 0..8{
                         let tmp~N = mod_ref.mul_mod_shoup(
-                        *self.coefficients.uget((i, ri + N)),
-                        *q_hat_inv_modq.get_unchecked(i),
-                        *q_hat_inv_modq_shoup.get_unchecked(i));
-
+                            *self.coefficients.uget((i, ri + N)),
+                            op,
+                            op_shoup
+                        );
                         nu~N += tmp~N as f64 * q_inv.get_unchecked(i);
-
-                        xiq.push(tmp~N);
+                        uninit.get_unchecked_mut(i*8+N).write(tmp~N);
                     });
                 }
+
+                xiq.set_len(q_size * 8);
 
                 for j in 0..p_size {
                     // Why not set `tmp` as a vec of u128? Apparently calling `drop_in_place` afterwards on
@@ -567,8 +573,7 @@ impl Poly {
                     let modpj = modp_ops.get_unchecked(j);
 
                     seq!(N in 0..8 {
-                        let pxi~N = p_coeffs.uget_mut((j, ri + N));
-                        *pxi~N = modpj.barret_reduction_u128(tmp~N);
+                        let pxi~N = p_coeffs.uget_mut((j, ri + N)).write(modpj.barret_reduction_u128(tmp~N));
                         *pxi~N = modpj.sub_mod_fast(*pxi~N, *alpha_modp.uget((nu~N as usize, j)));
 
                     });
@@ -576,7 +581,10 @@ impl Poly {
             }
         }
 
-        Poly::new(p_coeffs, p_context, Representation::Coefficient)
+        unsafe {
+            let p_coeffs = p_coeffs.assume_init();
+            return Poly::new(p_coeffs, p_context, Representation::Coefficient);
+        }
     }
 
     pub fn fast_expand_crt_basis_p_over_q(

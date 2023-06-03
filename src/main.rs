@@ -40,13 +40,15 @@ fn fast_conv_p_over_q() {
     }
 }
 
+
+
 fn main() {
     rayon::ThreadPoolBuilder::new()
         .num_threads(1)
         .build_global()
         .unwrap();
-    // switch_crt_basis();
-    fast_conv_p_over_q();
+    switch_crt_basis();
+    // fast_conv_p_over_q();
     // let mut rng = thread_rng();
     // let params = Arc::new(BfvParameters::new(
     //     &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
