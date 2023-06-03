@@ -11,6 +11,7 @@ use rand::{CryptoRng, RngCore};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use seq_macro::seq;
 use std::{
+    mem::MaybeUninit,
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     sync::Arc,
 };
@@ -440,86 +441,64 @@ impl Poly {
     ) -> Poly {
         debug_assert!(self.representation == Representation::Coefficient);
 
-        let mut p = Poly::zero(p_context, &Representation::Coefficient);
         let q_size = self.context.moduli.len();
-        azip!(
-            p.coefficients.axis_iter_mut(Axis(1)).into_producer(),
-            self.coefficients.axis_iter(Axis(1)).into_producer()
-        )
-        .par_for_each(|mut p_rests, q_rests| {
-            let mut xiv = Vec::with_capacity(q_size);
-            let mut nu = 0.5;
-            izip!(
-                q_rests.iter(),
-                neg_pq_hat_inv_modq.iter(),
-                neg_pq_hat_inv_modq_shoup.iter(),
-                q_inv.iter(),
-                self.context.moduli_ops.iter()
-            )
-            .for_each(
-                |(xi, neg_pqi_hat_inv, neg_pq_hat_inv_shoup, qi_inv, modqi)| {
-                    let tmp = modqi.mul_mod_shoup(*xi, *neg_pqi_hat_inv, *neg_pq_hat_inv_shoup);
-                    xiv.push(tmp);
-                    nu += tmp as f64 * qi_inv;
-                },
-            );
+        let p_size = p_context.moduli.len();
+        let degree = self.context.degree;
 
-            izip!(
-                p_rests.iter_mut(),
-                p_context.moduli_ops.iter(),
-                q_inv_modp.outer_iter()
-            )
-            .for_each(|(pxi, modpj, q_inv_modpj)| {
-                let mut tmp = 0u128;
-                izip!(xiv.iter(), q_inv_modpj.iter()).for_each(|(v, qi_inv_modpj)| {
-                    tmp += *v as u128 * *qi_inv_modpj as u128;
+        let modqs = self.context.moduli_ops.as_ref();
+        let modps = p_context.moduli_ops.as_ref();
+
+        let mut p_coeffs = Array2::<u64>::uninit((p_size, degree));
+        unsafe {
+            //
+            for ri in (0..degree).step_by(8) {
+                let mut xiv = Vec::with_capacity(q_size);
+
+                seq!(N in 0..8 {
+                    let mut nu~N = 0.5f64;
                 });
-                tmp -= nu as u128;
-                *pxi = modpj.barret_reduction_u128(tmp);
-            })
-        });
 
-        p
+                for i in 0..q_size {
+                    let modqi = modqs.get_unchecked(i);
+                    let op = *neg_pq_hat_inv_modq.get_unchecked(i);
+                    let op_shoup = *neg_pq_hat_inv_modq_shoup.get_unchecked(i);
+                    let qi_inv = q_inv.get_unchecked(i);
+                    seq!(N in 0..8 {
+                        let tmp~N = modqi.mul_mod_shoup(*self.coefficients.uget((i, ri+N)), op, op_shoup);
+                        nu~N += tmp~N as f64 * qi_inv;
+                        xiv.push(tmp~N);
+                    });
+                }
 
-        // Note: Below is the old code for the function and I have kept it around because it baffles me!
-        // This version is 200% times slower than the current version (above) and I am not sure why?
-        // The current version maps multiplication of q_rests with neg_pqi_hat_inv for each modqi into
-        // a local vector and then performs calculation per p_rests, that is p_rests is outer loop and local vector is inner
-        // loop. What baffles me is that current version somewhat does a bit extra amount of work than
-        // this version, and is still a lot faster! I suspect the reason for this is cache locality. Hence,
-        // I wanted to keep this code around and check whether I can someday resolve this issue and use this
-        // version!
-        // let mut p = Poly::zero(p_context, &Representation::Coefficient);
+                seq!(N in 0..8 {
+                    let nu~N = nu~N as u64;
+                });
 
-        // azip!(
-        //     p.coefficients.axis_iter_mut(Axis(1)).into_producer(),
-        //     self.coefficients.axis_iter(Axis(1)).into_producer()
-        // )
-        // .par_for_each(|mut p_rests, q_rests| {
-        //     izip!(
-        //         q_rests.iter(),
-        //         q_inv_modp.outer_iter(),
-        //         neg_pq_hat_inv_modq.iter(),
-        //         neg_pq_hat_inv_modq_shoup.iter(),
-        //         self.context.moduli_ops.iter()
-        //     )
-        //     .for_each(
-        //         |(xi, qi_inv_modp, neg_pqi_hat_inv, neg_pq_hat_inv_shoup, modqi)| {
-        //             // TODO: replacing mul_mod_fast with mul_mod_shoup only increases perf by 4%
-        //             let xi_v = modqi.mul_mod_shoup(*xi, *neg_pqi_hat_inv, *neg_pq_hat_inv_shoup);
-        //             izip!(
-        //                 p_rests.iter_mut(),
-        //                 qi_inv_modp.iter(),
-        //                 p_context.moduli_ops.iter()
-        //             )
-        //             .for_each(|(pxi, qi_inv, modpi)| {
-        //                 let tmp = modpi.mul_mod_fast(xi_v, *qi_inv);
-        //                 *pxi = modpi.add_mod_fast(*pxi, tmp);
-        //             })
-        //         },
-        //     );
-        // });
-        // p
+                for j in 0..p_size {
+                    seq!(N in 0..8 {
+                        let mut tmp~N = 0u128;
+                    });
+                    for i in 0..q_size {
+                        let op = *q_inv_modp.uget((j, i)) as u128;
+
+                        seq!(N in 0..8 {
+                            tmp~N += *xiv.get_unchecked(i * 8 + N) as u128 * op;
+                        });
+                    }
+
+                    let modpj = modps.get_unchecked(j);
+                    seq!(N in 0..8 {
+                        let pxj = p_coeffs.uget_mut((j, ri+N)).write(modpj.barret_reduction_u128(tmp~N));
+                        *pxj = modpj.sub_mod_fast(*pxj, nu~N);
+                    });
+                }
+            }
+        }
+
+        unsafe {
+            let p_coeffs = p_coeffs.assume_init();
+            return Poly::new(p_coeffs, p_context, Representation::Coefficient);
+        }
     }
 
     pub fn switch_crt_basis(

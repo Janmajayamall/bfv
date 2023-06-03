@@ -22,12 +22,31 @@ fn switch_crt_basis() {
     }
 }
 
+fn fast_conv_p_over_q() {
+    let mut rng = thread_rng();
+    let bfv_params = BfvParameters::default(15, 1 << 15);
+    let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
+    let p_context = bfv_params.extension_poly_contexts[0].clone();
+    let mut q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
+
+    for _ in 0..10000 {
+        let _ = q_poly.fast_conv_p_over_q(
+            &p_context,
+            &bfv_params.neg_pql_hat_inv_modql[0],
+            &bfv_params.neg_pql_hat_inv_modql_shoup[0],
+            &bfv_params.ql_inv[0],
+            &bfv_params.ql_inv_modp[0],
+        );
+    }
+}
+
 fn main() {
     rayon::ThreadPoolBuilder::new()
         .num_threads(1)
         .build_global()
         .unwrap();
-    switch_crt_basis();
+    // switch_crt_basis();
+    fast_conv_p_over_q();
     // let mut rng = thread_rng();
     // let params = Arc::new(BfvParameters::new(
     //     &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
