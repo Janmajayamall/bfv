@@ -393,7 +393,7 @@ impl HybridKeySwitchingKey {
             let mut parts_count = qj_coefficients.shape()[0];
 
             let mut p_whole_coefficients = Poly::approx_switch_crt_basis(
-                qj_coefficients,
+                &qj_coefficients,
                 &self.q_mod_ops_parts[i],
                 poly.context.degree,
                 &self.q_hat_inv_modq_parts[i],

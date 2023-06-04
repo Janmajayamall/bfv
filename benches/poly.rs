@@ -199,7 +199,7 @@ fn bench_poly(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("approximate_switch_crt_basis", ""), |b| {
             b.iter(|| {
                 Poly::approx_switch_crt_basis(
-                    q_poly.coefficients.view(),
+                    &q_poly.coefficients.view(),
                     &q_context.moduli_ops,
                     q_context.degree,
                     &q_hat_inv_modq,

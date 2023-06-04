@@ -710,7 +710,7 @@ impl Poly {
     ///
     /// Note: the result is approximate since overflow is ignored.
     pub fn approx_switch_crt_basis(
-        q_coefficients: ArrayView2<u64>,
+        q_coefficients: &ArrayView2<u64>,
         q_moduli_ops: &[Modulus],
         degree: usize,
         q_hat_inv_modq: &[u64],
@@ -726,11 +726,9 @@ impl Poly {
         let q_size = q_coefficients.shape()[0];
 
         unsafe {
-            for ri in (0..degree).step_by(8) {
-                // let mut tmp = Vec::with_capacity(q_size);
+            for ri in (0..degree / 8) {
                 let mut tmp: [MaybeUninit<u64>; 3 * 8] = MaybeUninit::uninit().assume_init();
 
-                // let uninit_tmp = tmp.spare_capacity_mut();
                 for i in 0..q_size {
                     let modq = q_moduli_ops.get_unchecked(i);
                     let op = *q_hat_inv_modq.get_unchecked(i);
@@ -789,7 +787,6 @@ impl Poly {
         let q_size = q_context.moduli.len();
 
         // Change P part of QP from `Evaluation` to `Coefficient` representation
-        let mut p_to_q_coefficients = Array2::zeros((q_size, self.context.degree));
         let mut p_coefficients = self.coefficients.slice_mut(s![q_size.., ..]);
         debug_assert!(p_coefficients.shape()[0] == p_context.ntt_ops.len());
         azip!(
@@ -797,48 +794,18 @@ impl Poly {
             // skip first `q_size` ntt ops
             p_context.ntt_ops.into_producer()
         )
-        .par_for_each(|mut v, ntt_op| {
+        .for_each(|mut v, ntt_op| {
             ntt_op.backward(v.as_slice_mut().unwrap());
         });
 
-        azip!(
-            p_to_q_coefficients.axis_iter_mut(Axis(1)),
-            p_coefficients.axis_iter(Axis(1))
-        )
-        .par_for_each(|mut p_to_q_rests, p_rests| {
-            let mut sum = Vec::with_capacity(q_size);
-
-            // TODO: the computation within each loop isn't much. Does it make sense to parallelize this by Axis(1) or shall
-            // we switch to parallelizing by Axis(0)
-            izip!(
-                p_rests.iter(),
-                p_hat_inv_modp.iter(),
-                p_hat_modq.outer_iter(),
-                p_context.moduli_ops.iter()
-            )
-            .for_each(|(xi, pi_hat_inv_modpi, pi_hat_modq, modpi)| {
-                // TODO: change this to mul shoup
-                let tmp = modpi.mul_mod_fast(*xi, *pi_hat_inv_modpi) as u128;
-                if sum.is_empty() {
-                    pi_hat_modq.iter().for_each(|pi_hat_modqj| {
-                        sum.push(tmp * *pi_hat_modqj as u128);
-                    });
-                } else {
-                    izip!(sum.iter_mut(), pi_hat_modq.iter()).for_each(|(vj, pi_hat_modqj)| {
-                        *vj += tmp * *pi_hat_modqj as u128;
-                    });
-                }
-            });
-
-            izip!(
-                p_to_q_rests.iter_mut(),
-                sum.iter(),
-                q_context.moduli_ops.iter()
-            )
-            .for_each(|(xi, xi_u128, modq)| {
-                *xi = modq.barret_reduction_u128(*xi_u128);
-            });
-        });
+        let mut p_to_q_coefficients = Poly::approx_switch_crt_basis(
+            &p_coefficients.view(),
+            &p_context.moduli_ops,
+            self.context.degree,
+            p_hat_inv_modp,
+            p_hat_modq,
+            &q_context.moduli_ops,
+        );
 
         // Change P switched to Q part from `Coefficient` to `Evaluation` representation
         // Reason to switch from coefficient to evaluation form becomes apparent in next step when we multiply all values by 1/P
@@ -846,13 +813,13 @@ impl Poly {
             p_to_q_coefficients.outer_iter_mut(),
             q_context.ntt_ops.into_producer()
         )
-        .par_for_each(|mut v, ntt_op| {
+        .for_each(|mut v, ntt_op| {
             ntt_op.forward(v.as_slice_mut().unwrap());
         });
 
         self.coefficients.slice_collapse(s![..q_size, ..]);
         debug_assert!(self.coefficients.shape()[0] == q_size);
-        // TODO: why is this not parallelized?
+
         izip!(
             self.coefficients.outer_iter_mut(),
             p_to_q_coefficients.outer_iter(),
@@ -1480,7 +1447,7 @@ mod tests {
 
         let now = std::time::Instant::now();
         let p_coefficients = Poly::approx_switch_crt_basis(
-            q_poly.coefficients.view(),
+            &q_poly.coefficients.view(),
             &q_context.moduli_ops,
             q_context.degree,
             &q_hat_inv_modq,

@@ -168,12 +168,83 @@ fn approx_switch_crt_basis() {
 
     for _ in 0..10000 {
         let _ = Poly::approx_switch_crt_basis(
-            q_poly.coefficients.view(),
+            &q_poly.coefficients.view(),
             &q_context.moduli_ops,
             q_context.degree,
             &q_hat_inv_modq,
             &q_hat_modp,
             &p_context.moduli_ops,
+        );
+    }
+}
+
+fn approx_mod_down() {
+    let degree = 1 << 15;
+    let q_moduli = generate_primes_vec(
+        &vec![60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
+        degree,
+        &[],
+    );
+    let p_moduli = generate_primes_vec(&vec![60, 60, 60], degree, &q_moduli);
+    let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
+
+    let q_context = Arc::new(PolyContext::new(&q_moduli, degree));
+    let p_context = Arc::new(PolyContext::new(&p_moduli, degree));
+    let qp_context = Arc::new(PolyContext::new(&qp_moduli, degree));
+
+    // just few checks
+    let q_size = q_context.moduli.len();
+    let p_size = p_context.moduli.len();
+    let qp_size: usize = q_size + p_size;
+
+    // Pre computation
+    let p = p_context.modulus();
+    let p_dig = p_context.modulus_dig();
+    let mut p_hat_inv_modp = vec![];
+    let mut p_hat_modq = vec![];
+    p_context.moduli.iter().for_each(|(pi)| {
+        p_hat_inv_modp.push(
+            (&p_dig / pi)
+                .mod_inverse(BigUintDig::from_u64(*pi).unwrap())
+                .unwrap()
+                .to_biguint()
+                .unwrap()
+                .to_u64()
+                .unwrap(),
+        );
+
+        // pi_hat_modq
+        let p_hat = &p / pi;
+        q_context
+            .moduli
+            .iter()
+            .for_each(|qi| p_hat_modq.push((&p_hat % qi).to_u64().unwrap()));
+    });
+    let p_hat_modq =
+        Array2::from_shape_vec((p_context.moduli.len(), q_context.moduli.len()), p_hat_modq)
+            .unwrap();
+    let mut p_inv_modq = vec![];
+    q_context.moduli.iter().for_each(|qi| {
+        p_inv_modq.push(
+            p_dig
+                .clone()
+                .mod_inverse(BigUintDig::from_u64(*qi).unwrap())
+                .unwrap()
+                .to_biguint()
+                .unwrap()
+                .to_u64()
+                .unwrap(),
+        );
+    });
+    let mut rng = thread_rng();
+    for _ in 0..10000 {
+        let mut qp_poly = Poly::random(&qp_context, &Representation::Evaluation, &mut rng);
+        let _ = qp_poly.approx_mod_down(
+            &q_context,
+            &p_context,
+            &p_hat_inv_modp,
+            &p_hat_modq,
+            &p_inv_modq,
         );
     }
 }
@@ -189,5 +260,6 @@ fn main() {
     // ciphertext_mul();
     // key_switch();
     // rotations();
-    approx_switch_crt_basis()
+    // approx_switch_crt_basis()
+    approx_mod_down();
 }
