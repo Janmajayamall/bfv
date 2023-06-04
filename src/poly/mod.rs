@@ -718,39 +718,49 @@ impl Poly {
         p_moduli_ops: &[Modulus],
     ) -> Array2<u64> {
         debug_assert!(q_moduli_ops.len() == q_coefficients.shape()[0]);
+        debug_assert!(q_moduli_ops.len() <= 3);
 
         let mut p_coeffs = Array2::<u64>::uninit((p_moduli_ops.len(), degree));
 
-        // TODO: the computation within each loop isn't much. Does it make sense to parallelize this by Axis(1) or shall
-        // we switch to parallelizing by Axis(0)
         let p_size = p_moduli_ops.len();
         let q_size = q_coefficients.shape()[0];
 
         unsafe {
-            for ri in 0..degree {
+            for ri in (0..degree).step_by(8) {
                 // let mut tmp = Vec::with_capacity(q_size);
-                let mut tmp: [MaybeUninit<u64>; 3] = MaybeUninit::uninit().assume_init();
+                let mut tmp: [MaybeUninit<u64>; 3 * 8] = MaybeUninit::uninit().assume_init();
 
                 // let uninit_tmp = tmp.spare_capacity_mut();
                 for i in 0..q_size {
                     let modq = q_moduli_ops.get_unchecked(i);
                     let op = *q_hat_inv_modq.get_unchecked(i);
 
-                    tmp.get_unchecked_mut(i)
-                        .write(modq.mul_mod_fast(*q_coefficients.uget((i, ri)), op));
+                    seq!(N in 0..8 {
+                        tmp.get_unchecked_mut(i*8+N)
+                        .write(modq.mul_mod_fast(*q_coefficients.uget((i, ri+N)), op));
+                    });
                 }
                 // tmp.set_len(q_size);
 
-                let tmp = mem::transmute::<_, [u64; 3]>(tmp);
+                let tmp = mem::transmute::<_, [u64; 3 * 8]>(tmp);
                 for j in 0..p_size {
-                    let mut s = 0u128;
+                    seq!(N in 0..8 {
+                        let mut s~N = 0u128;
+                    });
+
                     for i in 0..q_size {
-                        s += *tmp.get_unchecked(i) as u128 * *q_hat_modp.uget((i, j)) as u128;
+                        let op = *q_hat_modp.uget((i, j)) as u128;
+                        seq!(N in 0..8 {
+                            s~N += *tmp.get_unchecked(i*8+N) as u128 * op;
+                        });
                     }
 
-                    p_coeffs
-                        .uget_mut((j, ri))
-                        .write(p_moduli_ops.get_unchecked(j).barret_reduction_u128(s));
+                    let modpj = p_moduli_ops.get_unchecked(j);
+                    seq!(N in 0..8 {
+                        p_coeffs
+                        .uget_mut((j, ri+N))
+                        .write(modpj.barret_reduction_u128(s~N));
+                    });
                 }
             }
         }
