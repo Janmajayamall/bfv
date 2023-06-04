@@ -11,7 +11,7 @@ use rand::{seq, CryptoRng, RngCore};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use seq_macro::seq;
 use std::{
-    mem::MaybeUninit,
+    mem::{self, MaybeUninit},
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     sync::Arc,
 };
@@ -717,39 +717,47 @@ impl Poly {
         q_hat_modp: &Array2<u64>,
         p_moduli_ops: &[Modulus],
     ) -> Array2<u64> {
-        let mut p = Array2::<u64>::zeros((p_moduli_ops.len(), degree));
+        debug_assert!(q_moduli_ops.len() == q_coefficients.shape()[0]);
+
+        let mut p_coeffs = Array2::<u64>::uninit((p_moduli_ops.len(), degree));
 
         // TODO: the computation within each loop isn't much. Does it make sense to parallelize this by Axis(1) or shall
         // we switch to parallelizing by Axis(0)
         let p_size = p_moduli_ops.len();
-        azip!(p.axis_iter_mut(Axis(1)), q_coefficients.axis_iter(Axis(1))).par_for_each(
-            |mut p_rests, q_rests| {
-                let mut sum: Vec<u128> = Vec::with_capacity(p_size);
-                izip!(
-                    q_rests.iter(),
-                    q_hat_inv_modq.iter(),
-                    q_hat_modp.outer_iter(),
-                    q_moduli_ops.iter()
-                )
-                .for_each(|(xi, qi_hat_inv_modqi, qi_hat_modp, modqi)| {
-                    // TODO: change this to mul shoup
-                    let tmp = modqi.mul_mod_fast(*xi, *qi_hat_inv_modqi);
-                    if sum.is_empty() {
-                        qi_hat_modp.iter().for_each(|qi_hat_modpj| {
-                            sum.push(tmp as u128 * *qi_hat_modpj as u128);
-                        })
-                    } else {
-                        izip!(sum.iter_mut(), qi_hat_modp.iter()).for_each(|(vj, qi_hat_modpj)| {
-                            *vj += (tmp as u128 * *qi_hat_modpj as u128)
-                        });
-                    }
-                });
+        let q_size = q_coefficients.shape()[0];
 
-                izip!(p_rests.iter_mut(), sum.iter(), p_moduli_ops.iter())
-                    .for_each(|(vj, vj_u128, modpj)| *vj = modpj.barret_reduction_u128(*vj_u128));
-            },
-        );
-        p
+        unsafe {
+            for ri in 0..degree {
+                // let mut tmp = Vec::with_capacity(q_size);
+                let mut tmp: [MaybeUninit<u64>; 3] = MaybeUninit::uninit().assume_init();
+
+                // let uninit_tmp = tmp.spare_capacity_mut();
+                for i in 0..q_size {
+                    let modq = q_moduli_ops.get_unchecked(i);
+                    let op = *q_hat_inv_modq.get_unchecked(i);
+
+                    tmp.get_unchecked_mut(i)
+                        .write(modq.mul_mod_fast(*q_coefficients.uget((i, ri)), op));
+                }
+                // tmp.set_len(q_size);
+
+                let tmp = mem::transmute::<_, [u64; 3]>(tmp);
+                for j in 0..p_size {
+                    let mut s = 0u128;
+                    for i in 0..q_size {
+                        s += *tmp.get_unchecked(i) as u128 * *q_hat_modp.uget((i, j)) as u128;
+                    }
+
+                    p_coeffs
+                        .uget_mut((j, ri))
+                        .write(p_moduli_ops.get_unchecked(j).barret_reduction_u128(s));
+                }
+            }
+        }
+
+        unsafe {
+            return p_coeffs.assume_init();
+        }
     }
 
     /// Approx mod down
@@ -1641,100 +1649,3 @@ mod tests {
         dbg!(arr.shape());
     }
 }
-
-// Cache
-//   unsafe {
-//             // for ri in (0..10).into_par_iter() {
-
-//             // }
-
-//             for ri in 0..degree {
-//                 let mut xiq0 = Vec::with_capacity(q_size);
-//                 let mut xiq1 = Vec::with_capacity(q_size);
-//                 let mut xiq2 = Vec::with_capacity(q_size);
-//                 let mut xiq3 = Vec::with_capacity(q_size);
-
-//                 let mut nu0 = 0.5f64;
-//                 let mut nu1 = 0.5f64;
-//                 let mut nu2 = 0.5f64;
-//                 let mut nu3 = 0.5f64;
-
-//                 for i in 0..q_size {
-//                     let mod_ref = modq_ops.get_unchecked(i);
-
-//                     let tmp0 = mod_ref.mul_mod_shoup(
-//                         *self.coefficients.uget((i, ri)),
-//                         *q_hat_inv_modq.get_unchecked(i),
-//                         *q_hat_inv_modq_shoup.get_unchecked(i),
-//                     );
-//                     let tmp1 = modq_ops.get_unchecked(i).mul_mod_shoup(
-//                         *self.coefficients.uget((i, ri + 1)),
-//                         *q_hat_inv_modq.get_unchecked(i),
-//                         *q_hat_inv_modq_shoup.get_unchecked(i),
-//                     );
-//                     let tmp2 = modq_ops.get_unchecked(i).mul_mod_shoup(
-//                         *self.coefficients.uget((i, ri + 2)),
-//                         *q_hat_inv_modq.get_unchecked(i),
-//                         *q_hat_inv_modq_shoup.get_unchecked(i),
-//                     );
-//                     let tmp3 = modq_ops.get_unchecked(i).mul_mod_shoup(
-//                         *self.coefficients.uget((i, ri + 3)),
-//                         *q_hat_inv_modq.get_unchecked(i),
-//                         *q_hat_inv_modq_shoup.get_unchecked(i),
-//                     );
-
-//                     nu0 += tmp0 as f64 * q_inv.get_unchecked(i);
-//                     nu1 += tmp1 as f64 * q_inv.get_unchecked(i);
-//                     nu2 += tmp2 as f64 * q_inv.get_unchecked(i);
-//                     nu3 += tmp3 as f64 * q_inv.get_unchecked(i);
-
-//                     xiq0.push(tmp0);
-//                     xiq1.push(tmp1);
-//                     xiq2.push(tmp2);
-//                     xiq3.push(tmp3);
-//                 }
-
-//                 for j in 0..p_size {
-//                     let mut tmp0 = 0u128;
-//                     let mut tmp1 = 0u128;
-//                     let mut tmp2 = 0u128;
-//                     let mut tmp3 = 0u128;
-
-//                     for i in 0..q_size {
-//                         let op2 = *q_hat_modp.uget((j, i)) as u128;
-
-//                         tmp0 += *xiq0.get_unchecked(i) as u128 * op2;
-//                         tmp1 += *xiq1.get_unchecked(i) as u128 * op2;
-//                         tmp2 += *xiq2.get_unchecked(i) as u128 * op2;
-//                         tmp3 += *xiq3.get_unchecked(i) as u128 * op2;
-//                     }
-
-//                     let index = j * degree + ri;
-//                     let pxi0 = p_coeffs.get_unchecked_mut(index);
-//                     std::ptr::write(pxi0, modp_ops.get_unchecked(j).barret_reduction_u128(tmp0));
-//                     *pxi0 = modp_ops
-//                         .get_unchecked(j)
-//                         .sub_mod_fast(*pxi0, *alpha_modp.uget((nu0 as usize, j)));
-
-//                     let pxi1 = p_coeffs.get_unchecked_mut(index + 1);
-//                     std::ptr::write(pxi1, modp_ops.get_unchecked(j).barret_reduction_u128(tmp1));
-//                     *pxi1 = modp_ops
-//                         .get_unchecked(j)
-//                         .sub_mod_fast(*pxi1, *alpha_modp.uget((nu1 as usize, j)));
-
-//                     let pxi2 = p_coeffs.get_unchecked_mut(index + 2);
-//                     std::ptr::write(pxi2, modp_ops.get_unchecked(j).barret_reduction_u128(tmp2));
-//                     *pxi2 = modp_ops
-//                         .get_unchecked(j)
-//                         .sub_mod_fast(*pxi2, *alpha_modp.uget((nu2 as usize, j)));
-
-//                     let pxi3 = p_coeffs.get_unchecked_mut(index + 3);
-//                     std::ptr::write(pxi3, modp_ops.get_unchecked(j).barret_reduction_u128(tmp3));
-//                     *pxi3 = modp_ops
-//                         .get_unchecked(j)
-//                         .sub_mod_fast(*pxi3, *alpha_modp.uget((nu3 as usize, j)));
-//                 }
-//             }
-
-//             p_coeffs.set_len(p_size * degree);
-//         }

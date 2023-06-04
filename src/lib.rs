@@ -14,6 +14,7 @@ pub use ciphertext::*;
 pub use galois_key::*;
 pub use key_switching_key::*;
 pub use modulus::*;
+pub use nb_theory::*;
 pub use parameters::*;
 pub use plaintext::*;
 pub use poly::*;
