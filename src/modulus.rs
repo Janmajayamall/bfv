@@ -3,7 +3,7 @@ use num_bigint::U64Digits;
 use num_bigint_dig::{prime::probably_prime, BigUint};
 use num_traits::{One, ToPrimitive};
 use rand::{distributions::Uniform, CryptoRng, Rng, RngCore};
-
+use seq_macro::seq;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Modulus {
     mu_hi: u64,
@@ -325,6 +325,15 @@ impl Modulus {
 
     pub fn mul_mod_fast_vec(&self, a: &mut [u64], b: &[u64]) {
         izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb));
+        // unsafe {
+        //     //
+        //     for i in 0..a.len() / 8 {
+        //         seq!(N in 0..8 {
+        //             let a0 = a.get_unchecked_mut(i+N);
+        //             *a0 = self.mul_mod_fast(*a0, *b.get_unchecked(i+N));
+        //         });
+        //     }
+        // }
     }
 
     pub fn mul_mod_shoup_vec(&self, a: &mut [u64], b: &[u64], b_shoup: &[u64]) {

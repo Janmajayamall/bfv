@@ -8,7 +8,7 @@ use num_bigint::{BigInt, BigUint};
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{identities::One, ToPrimitive, Zero};
 use rand::{seq, CryptoRng, RngCore};
-use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use seq_macro::seq;
 use std::{
     mem::{self, MaybeUninit},
@@ -836,19 +836,23 @@ impl Poly {
     }
 
     pub fn mod_down_next(&mut self, last_qi_inv_modq: &[u64], new_ctx: &Arc<PolyContext>) {
-        let p = self.coefficients.slice(s![-1, ..]).to_owned();
-        self.coefficients.slice_collapse(s![..-1, ..]);
+        // let p = self.coefficients.slice(s![-1, ..]).to_owned();
+        let (mut coeffs, p) = self
+            .coefficients
+            .view_mut()
+            .split_at(Axis(0), self.context.moduli.len() - 1);
         azip!(
-            self.coefficients.outer_iter_mut().into_producer(),
+            coeffs.outer_iter_mut().into_producer(),
             new_ctx.moduli_ops.into_producer(),
             last_qi_inv_modq.into_producer()
         )
         .for_each(|mut ceoffs, modqi, last_qi_modqi| {
-            let mut tmp = p.clone();
+            let mut tmp = p.to_owned();
             modqi.reduce_vec(tmp.as_slice_mut().unwrap());
             modqi.sub_mod_fast_vec(ceoffs.as_slice_mut().unwrap(), tmp.as_slice().unwrap());
             modqi.scalar_mul_mod_fast_vec(ceoffs.as_slice_mut().unwrap(), *last_qi_modqi);
         });
+        self.coefficients.slice_collapse(s![..-1, ..]);
         self.context = new_ctx.clone();
     }
 
@@ -904,7 +908,6 @@ impl Poly {
 
 impl AddAssign<&Poly> for Poly {
     fn add_assign(&mut self, rhs: &Poly) {
-        // Note: Use debug_assert instead of assert since it takes significantly longer if the trick of just checking arc pointers in stack fails.
         debug_assert!(self.context == rhs.context);
         debug_assert!(self.representation == rhs.representation);
         izip!(

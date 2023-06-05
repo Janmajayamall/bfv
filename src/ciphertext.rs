@@ -350,7 +350,7 @@ mod tests {
             .unwrap();
 
         let mut rng = thread_rng();
-        let params = Arc::new(BfvParameters::new(&[60, 60, 60], 65537, 1 << 15));
+        let params = Arc::new(BfvParameters::default(10, 1 << 4));
         let sk = SecretKey::random(&params, &mut rng);
 
         let mut m1 = rng

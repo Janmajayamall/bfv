@@ -249,6 +249,29 @@ fn approx_mod_down() {
     }
 }
 
+fn mod_down_next() {
+    let mut rng = thread_rng();
+    let params = BfvParameters::default(15, 1 << 15);
+    let q_ctx = params.ciphertext_ctx_at_level(0);
+    let q_poly = Poly::random(&q_ctx, &Representation::Coefficient, &mut rng);
+    for _ in 0..10000 {
+        let mut p = q_poly.clone();
+        p.mod_down_next(
+            &params.lastq_inv_modq[0],
+            &params.ciphertext_ctx_at_level(1),
+        );
+    }
+}
+
+fn barrett_reduction_u128() {
+    let modulus = Modulus::new(1152921504606748673);
+    let a: u128 = thread_rng().gen();
+
+    for _ in 0..100000000 {
+        modulus.barret_reduction_u128(a);
+    }
+}
+
 fn main() {
     rayon::ThreadPoolBuilder::new()
         .num_threads(1)
@@ -261,5 +284,7 @@ fn main() {
     // key_switch();
     // rotations();
     // approx_switch_crt_basis()
-    approx_mod_down();
+    // approx_mod_down();
+    // barrett_reduction_u128();
+    mod_down_next();
 }
