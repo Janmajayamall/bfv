@@ -726,7 +726,7 @@ impl Poly {
         let q_size = q_coefficients.shape()[0];
 
         unsafe {
-            for ri in (0..degree / 8) {
+            for ri in (0..degree).step_by(8) {
                 let mut tmp: [MaybeUninit<u64>; 3 * 8] = MaybeUninit::uninit().assume_init();
 
                 for i in 0..q_size {
@@ -836,7 +836,6 @@ impl Poly {
     }
 
     pub fn mod_down_next(&mut self, last_qi_inv_modq: &[u64], new_ctx: &Arc<PolyContext>) {
-        // let p = self.coefficients.slice(s![-1, ..]).to_owned();
         let (mut coeffs, p) = self
             .coefficients
             .view_mut()
@@ -1484,7 +1483,7 @@ mod tests {
     #[test]
     pub fn test_approx_mod_down() {
         let mut rng = thread_rng();
-        let polynomial_degree = 1 << 3;
+        let polynomial_degree = 1 << 4;
         let q_moduli = generate_primes_vec(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
         let p_moduli = generate_primes_vec(&vec![60], polynomial_degree, &q_moduli);
         let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();

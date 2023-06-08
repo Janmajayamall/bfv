@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn hybrid_key_switching() {
-        let bfv_params = Arc::new(BfvParameters::new(&[60, 60, 60, 60, 60], 65537, 1 << 4));
+        let bfv_params = Arc::new(BfvParameters::default(5, 1 << 3));
         let ct_ctx = bfv_params.ciphertext_poly_contexts[0].clone();
         let ksk_ctx = ct_ctx.clone();
 

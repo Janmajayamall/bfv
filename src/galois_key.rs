@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn rotation_works() {
-        let bfv_params = Arc::new(BfvParameters::default(3, 1 << 3));
+        let bfv_params = Arc::new(BfvParameters::default(3, 1 << 15));
         let mut rng = thread_rng();
         let sk = SecretKey::random(&bfv_params, &mut rng);
 
@@ -100,7 +100,7 @@ mod tests {
             .random_vec(bfv_params.polynomial_degree, &mut rng);
         let pt = Plaintext::encode(&m, &bfv_params, Encoding::simd(0));
         let ct = sk.encrypt(&pt, &mut rng);
-
+        dbg!(sk.measure_noise(&ct, &mut rng));
         // rotate left by 1
         let galois_key = GaloisKey::new(3, &bfv_params.ciphertext_poly_contexts[0], &sk, &mut rng);
 
@@ -108,7 +108,7 @@ mod tests {
         dbg!(sk.measure_noise(&ct_rotated, &mut rng));
 
         let res_m = sk.decrypt(&ct_rotated).decode(Encoding::simd(0));
-        dbg!(m, res_m);
+        // dbg!(m, res_m);
     }
 
     #[test]
