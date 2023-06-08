@@ -16,6 +16,7 @@ fn bench_poly(c: &mut Criterion) {
     let mut group = c.benchmark_group("poly");
     group.measurement_time(Duration::new(10, 0));
     group.sample_size(100);
+    let batch_size = BatchSize::NumBatches(1000);
 
     let plaintext_modulus = 65537;
     let degree = 1 << 15;
@@ -281,7 +282,7 @@ fn bench_poly(c: &mut Criterion) {
                         &p_inv_modq,
                     );
                 },
-                BatchSize::SmallInput,
+                batch_size,
             )
         });
     }
@@ -299,7 +300,7 @@ fn bench_poly(c: &mut Criterion) {
                         &params.ciphertext_ctx_at_level(1),
                     );
                 },
-                BatchSize::SmallInput,
+                batch_size,
             )
         });
     }
