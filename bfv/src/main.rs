@@ -1,10 +1,12 @@
 use bfv::*;
+use fhe_math::zq::ntt::NttOperator;
 use itertools::{izip, Itertools};
 use ndarray::Array2;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{FromPrimitive, ToPrimitive};
 use rand::{distributions::Uniform, thread_rng, Rng};
 use std::sync::Arc;
+
 
 fn switch_crt_basis() {
     let mut rng = thread_rng();
@@ -140,8 +142,8 @@ fn approx_switch_crt_basis() {
     );
     let q_moduli = generate_primes_vec(&vec![60, 60, 60], degree, &p_moduli);
 
-    let q_context = Arc::new(PolyContext::new(&q_moduli, degree));
-    let p_context = Arc::new(PolyContext::new(&p_moduli, degree));
+    let q_context = Arc::new(PolyContext::<NttOperator>::new(&q_moduli, degree));
+    let p_context = Arc::new(PolyContext::<NttOperator>::new(&p_moduli, degree));
 
     // Pre-computation
     let mut q_hat_inv_modq = vec![];
@@ -167,7 +169,7 @@ fn approx_switch_crt_basis() {
     let q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
 
     for _ in 0..10000 {
-        let _ = Poly::approx_switch_crt_basis(
+        let _ = Poly::<NttOperator>::approx_switch_crt_basis(
             &q_poly.coefficients.view(),
             &q_context.moduli_ops,
             q_context.degree,
@@ -188,9 +190,9 @@ fn approx_mod_down() {
     let p_moduli = generate_primes_vec(&vec![60, 60, 60], degree, &q_moduli);
     let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
 
-    let q_context = Arc::new(PolyContext::new(&q_moduli, degree));
-    let p_context = Arc::new(PolyContext::new(&p_moduli, degree));
-    let qp_context = Arc::new(PolyContext::new(&qp_moduli, degree));
+    let q_context = Arc::new(PolyContext::<NttOperator>::new(&q_moduli, degree));
+    let p_context = Arc::new(PolyContext::<NttOperator>::new(&p_moduli, degree));
+    let qp_context = Arc::new(PolyContext::<NttOperator>::new(&qp_moduli, degree));
 
     // just few checks
     let q_size = q_context.moduli.len();

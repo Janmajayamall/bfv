@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn ciphertext_mul_lazy() {
         let mut rng = thread_rng();
-        let params = Arc::new(BfvParameters::new(&[60, 60, 60], 65537, 1 << 15));
+        let params = Arc::new(BfvParameters::default(4, 1 << 15));
         let sk = SecretKey::random(&params, &mut rng);
 
         let m0 = rng
@@ -484,7 +484,7 @@ mod tests {
     #[test]
     fn ciphertext_plaintext_mul() {
         let mut rng = thread_rng();
-        let params = Arc::new(BfvParameters::new(&[60, 60, 60], 65537, 1 << 3));
+        let params = Arc::new(BfvParameters::default(3, 1 << 15));
         let sk = SecretKey::random(&params, &mut rng);
 
         let mut m1 = params
@@ -589,11 +589,7 @@ mod tests {
     }
     #[test]
     fn clone_perf() {
-        let params = Arc::new(BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
-            65537,
-            1 << 15,
-        ));
+        let params = Arc::new(BfvParameters::default(10, 1 << 15));
 
         let now = std::time::Instant::now();
         let a = Poly::zero(

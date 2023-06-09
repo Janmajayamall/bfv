@@ -399,7 +399,7 @@ where
             };
             let mut parts_count = qj_coefficients.shape()[0];
 
-            let mut p_whole_coefficients = Poly::approx_switch_crt_basis(
+            let mut p_whole_coefficients = Poly::<T>::approx_switch_crt_basis(
                 &qj_coefficients,
                 &self.q_mod_ops_parts[i],
                 poly.context.degree,
@@ -607,11 +607,7 @@ mod tests {
 
     #[test]
     fn key_switching_works() {
-        let bfv_params = Arc::new(BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
-            65537,
-            1 << 15,
-        ));
+        let bfv_params = Arc::new(BfvParameters::default(15, 1 << 15));
         let ct_ctx = bfv_params.ciphertext_poly_contexts[0].clone();
         let ksk_ctx = ct_ctx.clone();
 
@@ -690,11 +686,7 @@ mod tests {
 
     #[test]
     fn comp() {
-        let bfv_params = Arc::new(BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
-            65537,
-            1 << 15,
-        ));
+        let bfv_params = Arc::new(BfvParameters::default(14, 1 << 15));
         let ctx = bfv_params.ciphertext_poly_contexts[0].clone();
 
         let mut rng = thread_rng();

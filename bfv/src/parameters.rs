@@ -11,7 +11,7 @@ use std::sync::Arc;
 use traits::Ntt;
 
 #[derive(PartialEq, Clone, Debug)]
-pub struct BfvParameters<T: Ntt + PartialEq> {
+pub struct BfvParameters<T: Ntt> {
     pub ciphertext_moduli: Box<[u64]>,
     pub extension_moduli: Box<[u64]>,
     pub ciphertext_moduli_sizes: Box<[usize]>,
@@ -586,26 +586,18 @@ where
         }
     }
 
-    pub fn default(moduli_count: usize, polynomial_degree: usize) -> Self {
-        BfvParameters::<NttOperator>::new(&vec![59; moduli_count], 65537, polynomial_degree)
-    }
-
     pub fn ciphertext_ctx_at_level(&self, level: usize) -> Arc<PolyContext<T>> {
         self.ciphertext_poly_contexts[level].clone()
+    }
+}
+
+impl BfvParameters<NttOperator> {
+    pub fn default(moduli_count: usize, polynomial_degree: usize) -> BfvParameters<NttOperator> {
+        BfvParameters::new(&vec![59; moduli_count], 65537, polynomial_degree)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn print_params_size() {
-        let params = BfvParameters::new(
-            &[60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
-            65537,
-            1 << 15,
-        );
-        dbg!(std::mem::size_of_val(&params));
-    }
 }

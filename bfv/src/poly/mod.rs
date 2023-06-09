@@ -790,7 +790,7 @@ where
             ntt_op.backward(v.as_slice_mut().unwrap());
         });
 
-        let mut p_to_q_coefficients = Poly::approx_switch_crt_basis(
+        let mut p_to_q_coefficients = Poly::<T>::approx_switch_crt_basis(
             &p_coefficients.view(),
             &p_context.moduli_ops,
             self.context.degree,
@@ -1117,7 +1117,7 @@ mod tests {
             .map(BigUint::from)
             .collect_vec();
 
-        let bfv_params = BfvParameters::new(&[60, 60, 60, 60], 65537, 8);
+        let bfv_params = BfvParameters::default(10, 1 << 3);
         let top_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let q_poly =
             Poly::try_convert_from_biguint(&values, &top_context, &Representation::Coefficient);
@@ -1190,7 +1190,7 @@ mod tests {
             .build_global()
             .unwrap();
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::new(&[60, 60, 60, 60], 65537, 8);
+        let bfv_params = BfvParameters::default(10, 1 << 3);
 
         let top_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let mut q_poly = Poly::random(&top_context, &Representation::Coefficient, &mut rng);
@@ -1229,13 +1229,7 @@ mod tests {
     #[test]
     pub fn test_fast_conv_p_over_q() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::new(
-            &[
-                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
-            ],
-            65537,
-            1 << 8,
-        );
+        let bfv_params = BfvParameters::default(10, 1 << 3);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -1279,7 +1273,7 @@ mod tests {
     #[test]
     pub fn test_switch_crt_basis() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::new(&[60, 60], 65537, 8);
+        let bfv_params = BfvParameters::default(10, 1 << 3);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -1315,14 +1309,7 @@ mod tests {
     #[test]
     pub fn test_fast_expand_crt_basis_p_over_q() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::new(
-            &[
-                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
-                60, 60, 60, 60, 60, 60, 60,
-            ],
-            65537,
-            1 << 3,
-        );
+        let bfv_params = BfvParameters::default(10, 1 << 3);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -1374,14 +1361,7 @@ mod tests {
     #[test]
     pub fn test_scale_and_round() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::new(
-            &[
-                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
-                60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60,
-            ],
-            65537,
-            1 << 3,
-        );
+        let bfv_params = BfvParameters::default(10, 1 << 13);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -1435,8 +1415,14 @@ mod tests {
         let p_moduli = generate_primes_vec(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
         let q_moduli = p_moduli[..3].to_vec();
 
-        let q_context = Arc::new(PolyContext::new(&q_moduli, polynomial_degree));
-        let p_context = Arc::new(PolyContext::new(&p_moduli, polynomial_degree));
+        let q_context = Arc::new(PolyContext::<NttOperator>::new(
+            &q_moduli,
+            polynomial_degree,
+        ));
+        let p_context = Arc::new(PolyContext::<NttOperator>::new(
+            &p_moduli,
+            polynomial_degree,
+        ));
 
         let mut p_poly = Poly::zero(&p_context, &Representation::Coefficient);
 
@@ -1467,7 +1453,7 @@ mod tests {
         let q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
 
         let now = std::time::Instant::now();
-        let p_coefficients = Poly::approx_switch_crt_basis(
+        let p_coefficients = Poly::<NttOperator>::approx_switch_crt_basis(
             &q_poly.coefficients.view(),
             &q_context.moduli_ops,
             q_context.degree,
@@ -1507,8 +1493,14 @@ mod tests {
         let p_moduli = generate_primes_vec(&vec![60], polynomial_degree, &q_moduli);
         let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
 
-        let q_context = Arc::new(PolyContext::new(&q_moduli, polynomial_degree));
-        let p_context = Arc::new(PolyContext::new(&p_moduli, polynomial_degree));
+        let q_context = Arc::new(PolyContext::<NttOperator>::new(
+            &q_moduli,
+            polynomial_degree,
+        ));
+        let p_context = Arc::new(PolyContext::<NttOperator>::new(
+            &p_moduli,
+            polynomial_degree,
+        ));
         let qp_context = Arc::new(PolyContext::new(&qp_moduli, polynomial_degree));
 
         let q_size = q_context.moduli.len();

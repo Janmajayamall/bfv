@@ -4,6 +4,7 @@ use bfv::{
     poly::{Poly, PolyContext, Representation},
 };
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use fhe_math::zq::ntt::NttOperator;
 use itertools::{izip, Itertools};
 use ndarray::Array2;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
@@ -11,6 +12,7 @@ use num_traits::{FromPrimitive, ToPrimitive};
 use rand::thread_rng;
 use std::sync::Arc;
 use std::time::Duration;
+use traits::Ntt;
 
 fn bench_poly(c: &mut Criterion) {
     let mut group = c.benchmark_group("poly");
@@ -170,8 +172,8 @@ fn bench_poly(c: &mut Criterion) {
         );
         let q_moduli = generate_primes_vec(&vec![60, 60, 60], degree, &p_moduli);
 
-        let q_context = Arc::new(PolyContext::new(&q_moduli, degree));
-        let p_context = Arc::new(PolyContext::new(&p_moduli, degree));
+        let q_context = Arc::new(PolyContext::<NttOperator>::new(&q_moduli, degree));
+        let p_context = Arc::new(PolyContext::<NttOperator>::new(&p_moduli, degree));
 
         // Pre-computation
         let mut q_hat_inv_modq = vec![];
@@ -199,7 +201,7 @@ fn bench_poly(c: &mut Criterion) {
 
         group.bench_function(BenchmarkId::new("approximate_switch_crt_basis", ""), |b| {
             b.iter(|| {
-                Poly::approx_switch_crt_basis(
+                Poly::<NttOperator>::approx_switch_crt_basis(
                     &q_poly.coefficients.view(),
                     &q_context.moduli_ops,
                     q_context.degree,
@@ -220,9 +222,9 @@ fn bench_poly(c: &mut Criterion) {
         let p_moduli = generate_primes_vec(&vec![60, 60, 60], degree, &q_moduli);
         let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
 
-        let q_context = Arc::new(PolyContext::new(&q_moduli, degree));
-        let p_context = Arc::new(PolyContext::new(&p_moduli, degree));
-        let qp_context = Arc::new(PolyContext::new(&qp_moduli, degree));
+        let q_context = Arc::new(PolyContext::<NttOperator>::new(&q_moduli, degree));
+        let p_context = Arc::new(PolyContext::<NttOperator>::new(&p_moduli, degree));
+        let qp_context = Arc::new(PolyContext::<NttOperator>::new(&qp_moduli, degree));
 
         // just few checks
         let q_size = q_context.moduli.len();

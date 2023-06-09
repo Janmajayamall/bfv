@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn test_encryption_decryption() {
         let mut rng = thread_rng();
-        let params = Arc::new(BfvParameters::new(&[60], 1153, 8));
+        let params = Arc::new(BfvParameters::default(1, 1 << 3));
         let sk = SecretKey::random(&params, &mut rng);
 
         let m = rng
