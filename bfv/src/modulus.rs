@@ -3,7 +3,6 @@ use num_bigint::U64Digits;
 use num_bigint_dig::{prime::probably_prime, BigUint};
 use num_traits::{One, ToPrimitive};
 use rand::{distributions::Uniform, CryptoRng, Rng, RngCore};
-use seq_macro::seq;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Modulus {
     mu_hi: u64,
@@ -294,7 +293,11 @@ impl Modulus {
     }
 
     pub fn add_mod_fast_vec(&self, a: &mut [u64], b: &[u64]) {
+        #[cfg(not(feature = "hexl"))]
         izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.add_mod_fast(*va, *vb));
+
+        #[cfg(feature = "hexl")]
+        hexl_rs::elwise_add_mod(a, b, self.modulus, a.len() as u64)
     }
 
     pub fn sub_mod_naive_vec(&self, a: &mut [u64], b: &[u64]) {
@@ -305,7 +308,11 @@ impl Modulus {
     ///
     /// Assumes each element in vec a and b are smaller than modulus
     pub fn sub_mod_fast_vec(&self, a: &mut [u64], b: &[u64]) {
+        #[cfg(not(feature = "hexl"))]
         izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.sub_mod_fast(*va, *vb));
+
+        #[cfg(feature = "hexl")]
+        hexl_rs::elwise_sub_mod(a, b, self.modulus, a.len() as u64)
     }
 
     pub fn neg_mod_fast_vec(&self, a: &mut [u64]) {
@@ -324,16 +331,11 @@ impl Modulus {
     }
 
     pub fn mul_mod_fast_vec(&self, a: &mut [u64], b: &[u64]) {
+        #[cfg(not(feature = "hexl"))]
         izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb));
-        // unsafe {
-        //     //
-        //     for i in 0..a.len() / 8 {
-        //         seq!(N in 0..8 {
-        //             let a0 = a.get_unchecked_mut(i+N);
-        //             *a0 = self.mul_mod_fast(*a0, *b.get_unchecked(i+N));
-        //         });
-        //     }
-        // }
+
+        #[cfg(feature = "hexl")]
+        hexl_rs::elwise_mult_mod(a, b, self.modulus, a.len() as u64, 1)
     }
 
     pub fn mul_mod_shoup_vec(&self, a: &mut [u64], b: &[u64], b_shoup: &[u64]) {
@@ -359,9 +361,13 @@ impl Modulus {
     }
 
     pub fn reduce_vec(&self, a: &mut [u64]) {
+        #[cfg(not(feature = "hexl"))]
         a.iter_mut().for_each(|v| {
             *v = self.reduce(*v);
         });
+
+        #[cfg(feature = "hexl")]
+        hexl_rs::elem_reduce_mod(a, self.modulus, a.len() as u64, 2, 1);
     }
 
     pub fn reduce_naive_vec(&self, a: &mut [u64]) {

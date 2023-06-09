@@ -1,7 +1,7 @@
 use crate::modulus::Modulus;
 use crate::nb_theory::generate_primes_vec;
 use crate::poly::{Poly, PolyContext, Representation};
-use fhe_math::zq::{ntt::NttOperator, Modulus as ModulusOld};
+use fhe_math::zq::Modulus as ModulusOld;
 use itertools::{izip, Itertools};
 use ndarray::Array2;
 use num_bigint::BigUint;
@@ -9,6 +9,12 @@ use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{Pow, ToPrimitive};
 use std::sync::Arc;
 use traits::Ntt;
+
+#[cfg(feature = "hexl")]
+use hexl_rs::NttOperator;
+
+#[cfg(not(feature = "hexl"))]
+use fhe_math::zq::ntt::NttOperator;
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct BfvParameters<T: Ntt> {
@@ -21,7 +27,7 @@ pub struct BfvParameters<T: Ntt> {
 
     pub plaintext_modulus: u64,
     pub plaintext_modulus_op: Modulus,
-    pub plaintext_ntt_op: NttOperator,
+    pub plaintext_ntt_op: T,
     pub polynomial_degree: usize,
 
     // Encryption
@@ -528,11 +534,7 @@ where
         let plaintext_modulus_op = Modulus::new(plaintext_modulus);
 
         // TODO: change ModulusOld with Modulus
-        let plaintext_ntt_op = NttOperator::new(
-            &ModulusOld::new(plaintext_modulus).unwrap(),
-            polynomial_degree,
-        )
-        .unwrap();
+        let plaintext_ntt_op = T::new(polynomial_degree, plaintext_modulus);
 
         BfvParameters {
             ciphertext_moduli: ciphertext_moduli.into_boxed_slice(),
@@ -591,6 +593,14 @@ where
     }
 }
 
+#[cfg(not(feature = "hexl"))]
+impl BfvParameters<NttOperator> {
+    pub fn default(moduli_count: usize, polynomial_degree: usize) -> BfvParameters<NttOperator> {
+        BfvParameters::new(&vec![59; moduli_count], 65537, polynomial_degree)
+    }
+}
+
+#[cfg(feature = "hexl")]
 impl BfvParameters<NttOperator> {
     pub fn default(moduli_count: usize, polynomial_degree: usize) -> BfvParameters<NttOperator> {
         BfvParameters::new(&vec![59; moduli_count], 65537, polynomial_degree)
