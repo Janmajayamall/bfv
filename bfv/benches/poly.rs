@@ -306,6 +306,24 @@ fn bench_poly(c: &mut Criterion) {
             )
         });
     }
+
+    {
+        let params = BfvParameters::default(15, 1 << 15);
+        let q_poly = Poly::random(
+            &params.ciphertext_ctx_at_level(0),
+            &Representation::Coefficient,
+            &mut rng,
+        );
+        group.bench_function(BenchmarkId::new("change_representation", ""), |b| {
+            b.iter_batched(
+                || q_poly.clone(),
+                |mut p| {
+                    p.change_representation(Representation::Evaluation);
+                },
+                batch_size,
+            )
+        });
+    }
 }
 
 criterion_group!(poly, bench_poly);

@@ -73,7 +73,7 @@ where
 
         let level = self.level;
 
-        // let mut now = std::time::Instant::now();
+        let mut now = std::time::Instant::now();
         let mut c00 = self.c[0].expand_crt_basis(
             &self.params.pq_poly_contexts[level],
             &self.params.extension_poly_contexts[level],
@@ -92,13 +92,14 @@ where
             &self.params.ql_inv[level],
             &self.params.alphal_modp[level],
         );
+        println!("Extend1 {:?}", now.elapsed());
         if c00.representation != Representation::Evaluation {
             c00.change_representation(Representation::Evaluation);
             c01.change_representation(Representation::Evaluation);
         }
-        // println!("Extend1 {:?}", now.elapsed());
+        println!("Extend1 (In Evaluation) {:?}", now.elapsed());
 
-        // now = std::time::Instant::now();
+        now = std::time::Instant::now();
         let mut c10 = rhs.c[0].fast_expand_crt_basis_p_over_q(
             &self.params.extension_poly_contexts[level],
             &self.params.pq_poly_contexts[level],
@@ -125,11 +126,12 @@ where
             &self.params.pl_inv[level],
             &self.params.alphal_modq[level],
         );
+        println!("Extend2 {:?}", now.elapsed());
         c10.change_representation(Representation::Evaluation);
         c11.change_representation(Representation::Evaluation);
-        // println!("Extend2 {:?}", now.elapsed());
+        println!("Extend2 (In Evaluation) {:?}", now.elapsed());
 
-        // now = std::time::Instant::now();
+        now = std::time::Instant::now();
         // tensor
         // c00 * c10
         let c_r0 = &c00 * &c10;
@@ -141,7 +143,7 @@ where
 
         // c01 * c11
         c01 *= &c11;
-        // println!("Tensor {:?}", now.elapsed());
+        println!("Tensor {:?}", now.elapsed());
 
         Ciphertext {
             c: vec![c_r0, c00, c01],
@@ -152,7 +154,9 @@ where
 
     pub fn multiply1(&self, rhs: &Ciphertext<T>) -> Ciphertext<T> {
         let mut res_ct = self.multiply1_lazy(rhs);
+        let now = std::time::Instant::now();
         res_ct.scale_and_round();
+        println!("ScaleAndRound {:?}", now.elapsed());
         res_ct
     }
 
@@ -393,7 +397,7 @@ mod tests {
             .unwrap();
 
         let mut rng = thread_rng();
-        let params = Arc::new(BfvParameters::default(10, 1 << 4));
+        let params = Arc::new(BfvParameters::default(15, 1 << 15));
         let sk = SecretKey::random(&params, &mut rng);
 
         let mut m1 = rng
