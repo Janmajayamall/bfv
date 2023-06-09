@@ -1,0 +1,40 @@
+[package]
+name = "bfv"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[dependencies]
+num-bigint-dig = {version = "0.8.2", features = ["prime"]}
+fhe-math = { git = "https://github.com/Janmajayamall/fhe.rs", branch = "compare" }
+fhe-util = { git = "https://github.com/Janmajayamall/fhe.rs", branch = "compare" }
+rand = "0.8.5"
+ndarray = {version = "0.15.6", features = ["rayon"]}
+itertools = "0.10.5"
+num-bigint = "0.4.3"
+num-traits = "0.2.15"
+crypto-bigint = "0.4.9"
+rand_chacha = "0.3.1"
+rayon = "1.7.0"
+seq-macro = "0.3"
+traits = {path = "../traits"}
+
+[dev-dependencies]
+criterion = "0.4"
+
+[[bench]]
+name = "modulus"
+harness = false
+
+[[bench]]
+name = "poly"
+harness = false
+
+[[bench]]
+name = "bfv"
+harness = false
+
+[features]
+hexl=[]
