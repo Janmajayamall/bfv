@@ -20,7 +20,7 @@ use traits::Ntt;
 mod poly_hexl;
 
 // const UNROLL_BY = 8;
-const PAR_CHUNK_SIZE: usize = 512;
+const PAR_CHUNK_SIZE: usize = 1 << 9;
 
 #[derive(Clone, PartialEq, Debug, Eq)]
 pub enum Representation {
@@ -214,12 +214,11 @@ where
     pub fn change_representation(&mut self, to: Representation) {
         if self.representation == Representation::Evaluation {
             if to == Representation::Coefficient {
-                izip!(
+                azip!(
                     self.coefficients.outer_iter_mut(),
-                    self.context.ntt_ops.iter()
+                    self.context.ntt_ops.into_producer()
                 )
-                .for_each(|(mut coefficients, ntt)| {
-                    // TODO: switch between native and hexl
+                .par_for_each(|mut coefficients, ntt| {
                     ntt.backward(coefficients.as_slice_mut().unwrap())
                 });
                 self.representation = Representation::Coefficient;
@@ -227,11 +226,11 @@ where
             }
         } else if self.representation == Representation::Coefficient {
             if to == Representation::Evaluation {
-                izip!(
+                azip!(
                     self.coefficients.outer_iter_mut(),
-                    self.context.ntt_ops.iter()
+                    self.context.ntt_ops.into_producer()
                 )
-                .for_each(|(mut coefficients, ntt)| {
+                .par_for_each(|mut coefficients, ntt| {
                     // TODO: switch between native and hexl
                     ntt.forward(coefficients.as_slice_mut().unwrap())
                 });
@@ -246,6 +245,14 @@ where
     /// Given polynomial in Q(X) returns Q(X^i) for substitution element i.
     /// In Evaluation form i must be an odd integer not a multiple of 2*degree.
     /// In Coefficient form i must be an integer not a multiple of 2*degree.
+    ///
+    /// Note on parallelization: Does it makes sense?
+    /// You cannot parallelize this across Axis(1) since depending on exponent
+    /// two or more ring dimensions may map to same ring dimension in resulting
+    /// polynomial. So the only option left is to parralelize across Axis(0).
+    /// However, Axis(0) in worst case will be of size 13-15 and considering the
+    /// fact that copy operations are pretty cheap, does the overhead of parallelization
+    /// makes sense?
     pub fn substitute(&self, subs: &Substitution) -> Poly<T> {
         debug_assert!(subs.exponent % (self.context.degree * 2) != 0);
         debug_assert!(self.context.degree == subs.degree);
@@ -256,7 +263,7 @@ where
                 p.coefficients.outer_iter_mut(),
                 self.coefficients.outer_iter()
             )
-            .par_for_each(|mut pv, qv| {
+            .for_each(|mut pv, qv| {
                 izip!(self.context.bit_reverse.iter(), subs.power_bitrev.iter()).for_each(
                     |(br, pr)| {
                         pv[*br] = qv[*pr];
@@ -374,57 +381,63 @@ where
         let modos = out_context.moduli_ops.as_ref();
 
         let mut o_coeffs = Array2::<u64>::uninit((output_size, degree));
-        unsafe {
-            for ri in (0..degree).step_by(8) {
-                seq!(N in 0..8 {
-                    let mut frac~N = U192::ZERO;
-                });
+        o_coeffs
+            .axis_chunks_iter_mut(Axis(1), PAR_CHUNK_SIZE)
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(chunk_index, mut o_coeffs_chunk)| {
+                unsafe {
+                    for ri in (0..PAR_CHUNK_SIZE).step_by(8) {
+                        seq!(N in 0..8 {
+                            let mut frac~N = U192::ZERO;
+                        });
 
-                for i in 0..input_size {
-                    let fhi = *to_s_hat_inv_mods_divs_frachi.get_unchecked(i) as u128;
-                    let flo = *to_s_hat_inv_mods_divs_fraclo.get_unchecked(i) as u128;
+                        for i in 0..input_size {
+                            let fhi = *to_s_hat_inv_mods_divs_frachi.get_unchecked(i) as u128;
+                            let flo = *to_s_hat_inv_mods_divs_fraclo.get_unchecked(i) as u128;
 
-                    seq!(N in 0..8 {
-                        let xi = *self.coefficients.uget((i + input_offset, ri+N));
-                        let lo = xi as u128 * flo;
-                        let hi = xi as u128 * fhi + (lo >> 64);
-                        frac~N = frac~N.wrapping_add(&U192::from_words([
-                            lo as u64,
-                            hi as u64,
-                            (hi >> 64) as u64,
-                        ]));
-                    });
-                }
-
-                seq!(N in 0..8 {
-                    let frac~N = frac~N.shr_vartime(127).as_words()[0] as u128;
-                });
-
-                for j in 0..output_size {
-                    seq!(N in 0..8 {
-                        let mut tmp~N = frac~N;
-                    });
-
-                    for i in 0..input_size {
-                        let op = *to_s_hat_inv_mods_divs_modo.uget((j, i)) as u128;
+                            seq!(N in 0..8 {
+                                let xi = *self.coefficients.uget((i + input_offset,chunk_index*PAR_CHUNK_SIZE + ri+N));
+                                let lo = xi as u128 * flo;
+                                let hi = xi as u128 * fhi + (lo >> 64);
+                                frac~N = frac~N.wrapping_add(&U192::from_words([
+                                    lo as u64,
+                                    hi as u64,
+                                    (hi >> 64) as u64,
+                                ]));
+                            });
+                        }
 
                         seq!(N in 0..8 {
-                            tmp~N += *self.coefficients.uget((i + input_offset, ri+N)) as u128 * op;
+                            let frac~N = frac~N.shr_vartime(127).as_words()[0] as u128;
                         });
+
+                        for j in 0..output_size {
+                            seq!(N in 0..8 {
+                                let mut tmp~N = frac~N;
+                            });
+
+                            for i in 0..input_size {
+                                let op = *to_s_hat_inv_mods_divs_modo.uget((j, i)) as u128;
+
+                                seq!(N in 0..8 {
+                                    tmp~N += *self.coefficients.uget((i + input_offset,chunk_index*PAR_CHUNK_SIZE + ri+N)) as u128 * op;
+                                });
+                            }
+
+                            let modoj = modos.get_unchecked(j);
+
+                            let op = *to_s_hat_inv_mods_divs_modo.uget((j, input_size)) as u128;
+
+                            seq!(N in 0..8 {
+                                tmp~N += *self.coefficients.uget((j + output_offset,chunk_index*PAR_CHUNK_SIZE + ri+N)) as u128 * op;
+                                let pxj = modoj.barret_reduction_u128(tmp~N);
+                                o_coeffs_chunk.uget_mut((j, ri+N)).write(pxj);
+                            });
+                        }
                     }
-
-                    let modoj = modos.get_unchecked(j);
-
-                    let op = *to_s_hat_inv_mods_divs_modo.uget((j, input_size)) as u128;
-
-                    seq!(N in 0..8 {
-                        tmp~N += *self.coefficients.uget((j + output_offset, ri+N)) as u128 * op;
-                        let pxj = modoj.barret_reduction_u128(tmp~N);
-                        o_coeffs.uget_mut((j, ri+N)).write(pxj);
-                    });
                 }
-            }
-        }
+            });
 
         unsafe {
             let o_coeffs = o_coeffs.assume_init();
@@ -458,53 +471,59 @@ where
         let modps = p_context.moduli_ops.as_ref();
 
         let mut p_coeffs = Array2::<u64>::uninit((p_size, degree));
-        unsafe {
-            //
-            for ri in (0..degree).step_by(8) {
-                let mut xiv = Vec::with_capacity(q_size * 8);
-                let uninit_xiv = xiv.spare_capacity_mut();
+        p_coeffs
+            .axis_chunks_iter_mut(Axis(1), PAR_CHUNK_SIZE)
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(chunk_index, mut p_coeffs_chunk)| {
+            unsafe {
+                //
+                for ri in (0..PAR_CHUNK_SIZE).step_by(8) {
+                    let mut xiv = Vec::with_capacity(q_size * 8);
+                    let uninit_xiv = xiv.spare_capacity_mut();
 
-                seq!(N in 0..8 {
-                    let mut nu~N = 0.5f64;
-                });
-
-                for i in 0..q_size {
-                    let modqi = modqs.get_unchecked(i);
-                    let op = *neg_pq_hat_inv_modq.get_unchecked(i);
-                    let op_shoup = *neg_pq_hat_inv_modq_shoup.get_unchecked(i);
-                    let qi_inv = q_inv.get_unchecked(i);
                     seq!(N in 0..8 {
-                        let tmp~N = modqi.mul_mod_shoup(*self.coefficients.uget((i, ri+N)), op, op_shoup);
-                        nu~N += tmp~N as f64 * qi_inv;
-                        uninit_xiv.get_unchecked_mut(i*8+N).write(tmp~N);
+                        let mut nu~N = 0.5f64;
                     });
-                }
 
-                xiv.set_len(q_size * 8);
-                seq!(N in 0..8 {
-                    let nu~N = nu~N as u64;
-                });
-
-                for j in 0..p_size {
-                    seq!(N in 0..8 {
-                        let mut tmp~N = 0u128;
-                    });
                     for i in 0..q_size {
-                        let op = *q_inv_modp.uget((j, i)) as u128;
-
+                        let modqi = modqs.get_unchecked(i);
+                        let op = *neg_pq_hat_inv_modq.get_unchecked(i);
+                        let op_shoup = *neg_pq_hat_inv_modq_shoup.get_unchecked(i);
+                        let qi_inv = q_inv.get_unchecked(i);
                         seq!(N in 0..8 {
-                            tmp~N += *xiv.get_unchecked(i * 8 + N) as u128 * op;
+                            let tmp~N = modqi.mul_mod_shoup(*self.coefficients.uget((i,chunk_index*PAR_CHUNK_SIZE + ri+N)), op, op_shoup);
+                            nu~N += tmp~N as f64 * qi_inv;
+                            uninit_xiv.get_unchecked_mut(i*8+N).write(tmp~N);
                         });
                     }
 
-                    let modpj = modps.get_unchecked(j);
+                    xiv.set_len(q_size * 8);
                     seq!(N in 0..8 {
-                        let pxj = p_coeffs.uget_mut((j, ri+N)).write(modpj.barret_reduction_u128(tmp~N));
-                        *pxj = modpj.sub_mod_fast(*pxj, nu~N);
+                        let nu~N = nu~N as u64;
                     });
+
+                    for j in 0..p_size {
+                        seq!(N in 0..8 {
+                            let mut tmp~N = 0u128;
+                        });
+                        for i in 0..q_size {
+                            let op = *q_inv_modp.uget((j, i)) as u128;
+
+                            seq!(N in 0..8 {
+                                tmp~N += *xiv.get_unchecked(i * 8 + N) as u128 * op;
+                            });
+                        }
+
+                        let modpj = modps.get_unchecked(j);
+                        seq!(N in 0..8 {
+                            let pxj = p_coeffs_chunk.uget_mut((j, ri+N)).write(modpj.barret_reduction_u128(tmp~N));
+                            *pxj = modpj.sub_mod_fast(*pxj, nu~N);
+                        });
+                    }
                 }
             }
-        }
+        });
 
         unsafe {
             let p_coeffs = p_coeffs.assume_init();
@@ -719,43 +738,50 @@ where
         let p_size = p_moduli_ops.len();
         let q_size = q_coefficients.shape()[0];
 
-        unsafe {
-            for ri in (0..degree).step_by(8) {
-                let mut tmp: [MaybeUninit<u64>; 3 * 8] = MaybeUninit::uninit().assume_init();
+        p_coeffs
+            .axis_chunks_iter_mut(Axis(1), PAR_CHUNK_SIZE)
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(chunk_index, mut p_coeffs_chunk)| {
+                unsafe {
+                    for ri in (0..PAR_CHUNK_SIZE).step_by(8) {
+                        let mut tmp: [MaybeUninit<u64>; 3 * 8] =
+                            MaybeUninit::uninit().assume_init();
 
-                for i in 0..q_size {
-                    let modq = q_moduli_ops.get_unchecked(i);
-                    let op = *q_hat_inv_modq.get_unchecked(i);
+                        for i in 0..q_size {
+                            let modq = q_moduli_ops.get_unchecked(i);
+                            let op = *q_hat_inv_modq.get_unchecked(i);
 
-                    seq!(N in 0..8 {
-                        tmp.get_unchecked_mut(i*8+N)
-                        .write(modq.mul_mod_fast(*q_coefficients.uget((i, ri+N)), op));
-                    });
-                }
-                // tmp.set_len(q_size);
+                            seq!(N in 0..8 {
+                                tmp.get_unchecked_mut(i*8+N)
+                                .write(modq.mul_mod_fast(*q_coefficients.uget((i,chunk_index*PAR_CHUNK_SIZE + ri+N)), op));
+                            });
+                        }
+                        // tmp.set_len(q_size);
 
-                let tmp = mem::transmute::<_, [u64; 3 * 8]>(tmp);
-                for j in 0..p_size {
-                    seq!(N in 0..8 {
-                        let mut s~N = 0u128;
-                    });
+                        let tmp = mem::transmute::<_, [u64; 3 * 8]>(tmp);
+                        for j in 0..p_size {
+                            seq!(N in 0..8 {
+                                let mut s~N = 0u128;
+                            });
 
-                    for i in 0..q_size {
-                        let op = *q_hat_modp.uget((i, j)) as u128;
-                        seq!(N in 0..8 {
-                            s~N += *tmp.get_unchecked(i*8+N) as u128 * op;
-                        });
+                            for i in 0..q_size {
+                                let op = *q_hat_modp.uget((i, j)) as u128;
+                                seq!(N in 0..8 {
+                                    s~N += *tmp.get_unchecked(i*8+N) as u128 * op;
+                                });
+                            }
+
+                            let modpj = p_moduli_ops.get_unchecked(j);
+                            seq!(N in 0..8 {
+                                p_coeffs_chunk
+                                .uget_mut((j, ri+N))
+                                .write(modpj.barret_reduction_u128(s~N));
+                            });
+                        }
                     }
-
-                    let modpj = p_moduli_ops.get_unchecked(j);
-                    seq!(N in 0..8 {
-                        p_coeffs
-                        .uget_mut((j, ri+N))
-                        .write(modpj.barret_reduction_u128(s~N));
-                    });
                 }
-            }
-        }
+            });
 
         unsafe {
             return p_coeffs.assume_init();
@@ -788,7 +814,7 @@ where
             // skip first `q_size` ntt ops
             p_context.ntt_ops.into_producer()
         )
-        .for_each(|mut v, ntt_op| {
+        .par_for_each(|mut v, ntt_op| {
             ntt_op.backward(v.as_slice_mut().unwrap());
         });
 
@@ -807,20 +833,20 @@ where
             p_to_q_coefficients.outer_iter_mut(),
             q_context.ntt_ops.into_producer()
         )
-        .for_each(|mut v, ntt_op| {
+        .par_for_each(|mut v, ntt_op| {
             ntt_op.forward(v.as_slice_mut().unwrap());
         });
 
         self.coefficients.slice_collapse(s![..q_size, ..]);
         debug_assert!(self.coefficients.shape()[0] == q_size);
 
-        izip!(
+        azip!(
             self.coefficients.outer_iter_mut(),
             p_to_q_coefficients.outer_iter(),
-            q_context.moduli_ops.iter(),
-            p_inv_modq.iter(),
+            q_context.moduli_ops.into_producer(),
+            p_inv_modq.into_producer(),
         )
-        .for_each(|((mut v, switched_v, modqi, p_inv_modqi))| {
+        .par_for_each(|mut v, switched_v, modqi, p_inv_modqi| {
             modqi.sub_mod_fast_vec(v.as_slice_mut().unwrap(), switched_v.as_slice().unwrap());
             modqi.scalar_mul_mod_fast_vec(v.as_slice_mut().unwrap(), *p_inv_modqi);
         });
@@ -986,7 +1012,7 @@ where
             rhs.coefficients.outer_iter().into_producer(),
             self.context.moduli_ops.into_producer()
         )
-        .for_each(|mut p, p2, modqi| {
+        .par_for_each(|mut p, p2, modqi| {
             modqi.mul_mod_fast_vec(p.as_slice_mut().unwrap(), p2.as_slice().unwrap());
         });
     }
@@ -1231,7 +1257,7 @@ mod tests {
     #[test]
     pub fn test_fast_conv_p_over_q() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::default(10, 1 << 3);
+        let bfv_params = BfvParameters::default(10, 1 << 15);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -1267,7 +1293,7 @@ mod tests {
         izip!(Vec::<BigUint>::from(&p_poly).iter(), p_expected.iter()).for_each(
             |(res, expected)| {
                 let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
-                dbg!(diff.bits());
+                assert!(diff.bits() == 0);
             },
         );
     }
@@ -1275,7 +1301,7 @@ mod tests {
     #[test]
     pub fn test_switch_crt_basis() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::default(10, 1 << 4);
+        let bfv_params = BfvParameters::default(10, 1 << 15);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -1413,7 +1439,7 @@ mod tests {
     #[test]
     pub fn test_approx_switch_crt_basis() {
         let mut rng = thread_rng();
-        let polynomial_degree = 8;
+        let polynomial_degree = 1 << 15;
         let p_moduli = generate_primes_vec(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
         let q_moduli = p_moduli[..3].to_vec();
 
@@ -1490,7 +1516,7 @@ mod tests {
     #[test]
     pub fn test_approx_mod_down() {
         let mut rng = thread_rng();
-        let polynomial_degree = 1 << 4;
+        let polynomial_degree = 1 << 15;
         let q_moduli = generate_primes_vec(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
         let p_moduli = generate_primes_vec(&vec![60], polynomial_degree, &q_moduli);
         let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
