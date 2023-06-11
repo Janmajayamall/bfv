@@ -8,7 +8,7 @@ use num_bigint::{BigInt, BigUint};
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{identities::One, ToPrimitive, Zero};
 use rand::{seq, CryptoRng, RngCore};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::*;
 use seq_macro::seq;
 use std::{
     mem::{self, MaybeUninit},
@@ -20,6 +20,7 @@ use traits::Ntt;
 mod poly_hexl;
 
 // const UNROLL_BY = 8;
+const PAR_CHUNK_SIZE: usize = 512;
 
 #[derive(Clone, PartialEq, Debug, Eq)]
 pub enum Representation {
@@ -530,21 +531,14 @@ where
         let modp_ops = p_context.moduli_ops.as_ref();
 
         let mut p_coeffs = Array2::uninit((p_size, degree));
-        // let splits = p_coeffs
-        //     .view_mut()
-        //     // .multi_slice_mut((s![.., ..(degree / 2)], s![.., (degree / 2)..]));
-        //     .split_at(Axis(1), degree / 2);
-        // let (p0, p1) = p_coeffs.view_mut().split_at(Axis(1), 10);
-        // (0..10).into_par_iter().for_each(|_| {
-        //     // p_coeffs.slice_mut(s![..3, ..]);
-        // });
-        let chunk_size = degree / 2;
+
         p_coeffs
-            .axis_chunks_iter_mut(Axis(1), chunk_size)
+            .axis_chunks_iter_mut(Axis(1), PAR_CHUNK_SIZE)
+            .into_par_iter()
             .enumerate()
             .for_each(|(chunk_index, mut p_coeffs_chunk)| {
                 unsafe {
-                    for ri in (0..chunk_size).step_by(8) {
+                    for ri in (0..PAR_CHUNK_SIZE).step_by(8) {
                         let mut xiq = Vec::with_capacity(q_size * 8);
                         let uninit = xiq.spare_capacity_mut();
 
@@ -559,7 +553,7 @@ where
                             let op_shoup = *q_hat_inv_modq_shoup.get_unchecked(i);
                             seq!(N in 0..8{
                                 let tmp~N = mod_ref.mul_mod_shoup(
-                                    *self.coefficients.uget((i, (chunk_index*chunk_size) + ri + N)),
+                                    *self.coefficients.uget((i, (chunk_index*PAR_CHUNK_SIZE) + ri + N)),
                                     op,
                                     op_shoup
                                 );

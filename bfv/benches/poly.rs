@@ -25,10 +25,10 @@ fn bench_poly(c: &mut Criterion) {
 
     let mut rng = thread_rng();
 
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
-        .build_global()
-        .unwrap();
+    // rayon::ThreadPoolBuilder::new()
+    //     .num_threads(1)
+    //     .build_global()
+    //     .unwrap();
     //TODO: add support for multiple polynomial degrees
     {
         let bfv_params = BfvParameters::default(2, 1 << 15);
