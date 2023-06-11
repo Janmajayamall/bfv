@@ -419,8 +419,6 @@ dependencies = [
  "bindgen",
  "cmake",
  "link-cplusplus",
- "rand",
- "traits 0.1.0 (git+https://github.com/Janmajayamall/bfv?branch=ntt-trait)",
 ]
 
 [[package]]
@@ -974,7 +972,7 @@ version = "0.1.0"
 [[package]]
 name = "traits"
 version = "0.1.0"
-source = "git+https://github.com/Janmajayamall/bfv?branch=ntt-trait#b1f7b3af7b69ad3a68db0300c69b102f658c7570"
+source = "git+https://github.com/Janmajayamall/bfv?branch=ntt-trait#fc0f1ca0432cee53098b17d344de91c48874952b"
 
 [[package]]
 name = "typenum"

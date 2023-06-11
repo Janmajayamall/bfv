@@ -530,64 +530,72 @@ where
         let modp_ops = p_context.moduli_ops.as_ref();
 
         let mut p_coeffs = Array2::uninit((p_size, degree));
+        // let splits = p_coeffs
+        //     .view_mut()
+        //     // .multi_slice_mut((s![.., ..(degree / 2)], s![.., (degree / 2)..]));
+        //     .split_at(Axis(1), degree / 2);
         // let (p0, p1) = p_coeffs.view_mut().split_at(Axis(1), 10);
         // (0..10).into_par_iter().for_each(|_| {
         //     // p_coeffs.slice_mut(s![..3, ..]);
         // });
+        let chunk_size = degree / 2;
+        p_coeffs
+            .axis_chunks_iter_mut(Axis(1), chunk_size)
+            .enumerate()
+            .for_each(|(chunk_index, mut p_coeffs_chunk)| {
+                unsafe {
+                    for ri in (0..chunk_size).step_by(8) {
+                        let mut xiq = Vec::with_capacity(q_size * 8);
+                        let uninit = xiq.spare_capacity_mut();
 
-        unsafe {
-            for ri in (0..degree).step_by(8) {
-                let mut xiq = Vec::with_capacity(q_size * 8);
-                let uninit = xiq.spare_capacity_mut();
-
-                seq!(N in 0..8{
-                    // let mut xiq~N = Vec::with_capacity(q_size);
-                    let mut nu~N = 0.5f64;
-                });
-
-                for i in 0..q_size {
-                    let mod_ref = modq_ops.get_unchecked(i);
-                    let op = *q_hat_inv_modq.get_unchecked(i);
-                    let op_shoup = *q_hat_inv_modq_shoup.get_unchecked(i);
-                    seq!(N in 0..8{
-                        let tmp~N = mod_ref.mul_mod_shoup(
-                            *self.coefficients.uget((i, ri + N)),
-                            op,
-                            op_shoup
-                        );
-                        nu~N += tmp~N as f64 * q_inv.get_unchecked(i);
-                        uninit.get_unchecked_mut(i*8+N).write(tmp~N);
-                    });
-                }
-
-                xiq.set_len(q_size * 8);
-
-                for j in 0..p_size {
-                    // Why not set `tmp` as a vec of u128? Apparently calling `drop_in_place` afterwards on
-                    // `tmp` if it were a vec of u128s is more expensive than using tmp as 8 different variables.
-                    seq!(N in 0..8{
-                        let mut tmp~N = 0u128;
-                    });
-
-                    for i in 0..q_size {
-                        let op2 = *q_hat_modp.uget((j, i)) as u128;
-
-                        seq!(N in 0..8 {
-                            tmp~N += *xiq.get_unchecked(i * 8 + N) as u128 * op2;
-
+                        seq!(N in 0..8{
+                            // let mut xiq~N = Vec::with_capacity(q_size);
+                            let mut nu~N = 0.5f64;
                         });
+
+                        for i in 0..q_size {
+                            let mod_ref = modq_ops.get_unchecked(i);
+                            let op = *q_hat_inv_modq.get_unchecked(i);
+                            let op_shoup = *q_hat_inv_modq_shoup.get_unchecked(i);
+                            seq!(N in 0..8{
+                                let tmp~N = mod_ref.mul_mod_shoup(
+                                    *self.coefficients.uget((i, (chunk_index*chunk_size) + ri + N)),
+                                    op,
+                                    op_shoup
+                                );
+                                nu~N += tmp~N as f64 * q_inv.get_unchecked(i);
+                                uninit.get_unchecked_mut(i*8+N).write(tmp~N);
+                            });
+                        }
+
+                        xiq.set_len(q_size * 8);
+
+                        for j in 0..p_size {
+                            // Why not set `tmp` as a vec of u128? Apparently calling `drop_in_place` afterwards on
+                            // `tmp` if it were a vec of u128s is more expensive than using tmp as 8 different variables.
+                            seq!(N in 0..8{
+                                let mut tmp~N = 0u128;
+                            });
+
+                            for i in 0..q_size {
+                                let op2 = *q_hat_modp.uget((j, i)) as u128;
+
+                                seq!(N in 0..8 {
+                                    tmp~N += *xiq.get_unchecked(i * 8 + N) as u128 * op2;
+
+                                });
+                            }
+
+                            let modpj = modp_ops.get_unchecked(j);
+
+                            seq!(N in 0..8 {
+                                let pxi~N = p_coeffs_chunk.uget_mut((j, ri + N)).write(modpj.barret_reduction_u128(tmp~N));
+                                *pxi~N = modpj.sub_mod_fast(*pxi~N, *alpha_modp.uget((nu~N as usize, j)));
+                            });
+                        }
                     }
-
-                    let modpj = modp_ops.get_unchecked(j);
-
-                    seq!(N in 0..8 {
-                        let pxi~N = p_coeffs.uget_mut((j, ri + N)).write(modpj.barret_reduction_u128(tmp~N));
-                        *pxi~N = modpj.sub_mod_fast(*pxi~N, *alpha_modp.uget((nu~N as usize, j)));
-
-                    });
                 }
-            }
-        }
+            });
 
         unsafe {
             let p_coeffs = p_coeffs.assume_init();
@@ -1273,7 +1281,7 @@ mod tests {
     #[test]
     pub fn test_switch_crt_basis() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::default(10, 1 << 3);
+        let bfv_params = BfvParameters::default(10, 1 << 4);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
