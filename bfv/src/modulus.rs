@@ -336,18 +336,18 @@ impl Modulus {
 
     pub fn mul_mod_fast_vec(&self, a: &mut [u64], b: &[u64]) {
         #[cfg(not(feature = "hexl"))]
-        a.par_chunks_mut(PAR_CHUNK_SIZE)
-            .zip(b.par_chunks(PAR_CHUNK_SIZE))
-            .for_each(|(a_chunk, b_chunk)| {
-                izip!(a_chunk.iter_mut(), b_chunk.iter())
-                    .for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb))
-            });
+        // a.par_chunks_mut(PAR_CHUNK_SIZE)
+        //     .zip(b.par_chunks(PAR_CHUNK_SIZE))
+        //     .for_each(|(a_chunk, b_chunk)| {
+        //         izip!(a_chunk.iter_mut(), b_chunk.iter())
+        //             .for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb))
+        //     });
         // a.par_iter_mut()
         //     .zip(b.par_iter())
         //     .for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb));
-        // a.iter_mut()
-        //     .zip(b.iter())
-        //     .for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb));
+        a.iter_mut()
+            .zip(b.iter())
+            .for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb));
         #[cfg(feature = "hexl")]
         hexl_rs::elwise_mult_mod(a, b, self.modulus, a.len() as u64, 1)
     }

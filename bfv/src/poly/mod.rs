@@ -1013,7 +1013,7 @@ where
             rhs.coefficients.outer_iter().into_producer(),
             self.context.moduli_ops.into_producer()
         )
-        .for_each(|mut p, p2, modqi| {
+        .par_for_each(|mut p, p2, modqi| {
             modqi.mul_mod_fast_vec(p.as_slice_mut().unwrap(), p2.as_slice().unwrap());
         });
     }
