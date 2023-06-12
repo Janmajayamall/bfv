@@ -11,11 +11,6 @@ fn bench_modulus(c: &mut Criterion) {
     let mut rng = thread_rng();
     let modulus = Modulus::new(PRIME);
 
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(4)
-        .build_global()
-        .unwrap();
-
     for i in [1 << 15] {
         let mut v = modulus.random_vec(i, &mut rng);
         let mut v2 = modulus.random_vec(i, &mut rng);

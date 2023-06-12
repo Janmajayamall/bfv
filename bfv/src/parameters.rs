@@ -1,7 +1,6 @@
 use crate::modulus::Modulus;
 use crate::nb_theory::generate_primes_vec;
 use crate::poly::{Poly, PolyContext, Representation};
-use fhe_math::zq::Modulus as ModulusOld;
 use itertools::{izip, Itertools};
 use ndarray::Array2;
 use num_bigint::BigUint;
@@ -9,12 +8,6 @@ use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{Pow, ToPrimitive};
 use std::sync::Arc;
 use traits::Ntt;
-
-#[cfg(feature = "hexl")]
-use hexl_rs::NttOperator;
-
-#[cfg(not(feature = "hexl"))]
-use fhe_math::zq::ntt::NttOperator;
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct BfvParameters<T: Ntt> {
@@ -594,13 +587,9 @@ where
 }
 
 #[cfg(not(feature = "hexl"))]
-impl BfvParameters<NttOperator> {
-    pub fn default(moduli_count: usize, polynomial_degree: usize) -> BfvParameters<NttOperator> {
-        BfvParameters::new(&vec![59; moduli_count], 65537, polynomial_degree)
-    }
-}
-
+use fhe_math::zq::ntt::NttOperator;
 #[cfg(feature = "hexl")]
+use hexl_rs::NttOperator;
 impl BfvParameters<NttOperator> {
     pub fn default(moduli_count: usize, polynomial_degree: usize) -> BfvParameters<NttOperator> {
         BfvParameters::new(&vec![59; moduli_count], 65537, polynomial_degree)

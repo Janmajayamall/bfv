@@ -419,6 +419,8 @@ dependencies = [
  "bindgen",
  "cmake",
  "link-cplusplus",
+ "rand",
+ "traits 0.1.0 (git+https://github.com/Janmajayamall/bfv?branch=ntt-trait)",
 ]
 
 [[package]]
@@ -503,9 +505,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.18"
+version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "518ef76f2f87365916b142844c16d8fefd85039bc5699050210a7778ee1cd1de"
+checksum = "b06a4cde4c0f271a446782e3eff8de789548ce57dbc8eca9292c27f4a42004b4"
 
 [[package]]
 name = "matrixmultiply"
@@ -653,9 +655,9 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "os_str_bytes"
-version = "6.5.0"
+version = "6.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ceedf44fb00f2d1984b0bc98102627ce622e083e49a5bacdb3e514fa4238e267"
+checksum = "4d5d9eb14b174ee9aa2ef96dc2b94637a2d4b6e7cb873c7e171f0c20c6cf3eac"
 
 [[package]]
 name = "peeking_take_while"
@@ -972,7 +974,7 @@ version = "0.1.0"
 [[package]]
 name = "traits"
 version = "0.1.0"
-source = "git+https://github.com/Janmajayamall/bfv?branch=ntt-trait#fc0f1ca0432cee53098b17d344de91c48874952b"
+source = "git+https://github.com/Janmajayamall/bfv?branch=ntt-trait#2e1abb6a65ff83d2b59358580da42d8364f869ae"
 
 [[package]]
 name = "typenum"

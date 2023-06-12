@@ -20,7 +20,7 @@ use traits::Ntt;
 mod poly_hexl;
 
 // const UNROLL_BY = 8;
-const PAR_CHUNK_SIZE: usize = 1 << 9;
+const PAR_CHUNK_SIZE: usize = 1 << 13;
 
 #[derive(Clone, PartialEq, Debug, Eq)]
 pub enum Representation {
@@ -886,7 +886,7 @@ where
             p2.coefficients.outer_iter(),
             self.context.moduli_ops.into_producer()
         )
-        .for_each(|mut a, b, c, modqi| {
+        .par_for_each(|mut a, b, c, modqi| {
             modqi.fma_reverse_vec(
                 a.as_slice_mut().unwrap(),
                 b.as_slice().unwrap(),
@@ -910,7 +910,7 @@ where
             p.coefficients.outer_iter(),
             self.context.moduli_ops.into_producer()
         )
-        .for_each(|mut a, b, modqi| {
+        .par_for_each(|mut a, b, modqi| {
             modqi.sub_mod_fast_vec_reversed(a.as_slice_mut().unwrap(), b.as_slice().unwrap());
         });
     }
@@ -920,7 +920,7 @@ where
             self.coefficients.outer_iter_mut(),
             self.context.moduli_ops.into_producer()
         )
-        .for_each(|mut coeffs, modqi| {
+        .par_for_each(|mut coeffs, modqi| {
             modqi.neg_mod_fast_vec(coeffs.as_slice_mut().unwrap());
         });
     }
@@ -963,12 +963,12 @@ where
     fn sub_assign(&mut self, rhs: &Poly<T>) {
         debug_assert!(self.context == rhs.context);
         debug_assert!(self.representation == rhs.representation);
-        izip!(
+        azip!(
             self.coefficients.outer_iter_mut(),
             rhs.coefficients.outer_iter(),
-            self.context.moduli_ops.iter()
+            self.context.moduli_ops.into_producer()
         )
-        .for_each(|(mut p1, p2, q)| {
+        .par_for_each(|mut p1, p2, q| {
             q.sub_mod_fast_vec(p1.as_slice_mut().unwrap(), p2.as_slice().unwrap())
         });
     }
@@ -1043,11 +1043,11 @@ where
     ) -> Poly<T> {
         assert!(values.len() == poly_context.degree);
         let mut p = Poly::zero(poly_context, representation);
-        izip!(
+        azip!(
             p.coefficients.outer_iter_mut(),
-            poly_context.moduli_ops.iter()
+            poly_context.moduli_ops.into_producer()
         )
-        .for_each(|(mut qi_values, qi)| {
+        .par_for_each(|mut qi_values, qi| {
             let mut xi = values.to_vec();
             qi.reduce_vec(&mut xi);
             qi_values.as_slice_mut().unwrap().copy_from_slice(&xi);

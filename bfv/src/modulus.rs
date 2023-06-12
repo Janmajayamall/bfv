@@ -14,8 +14,6 @@ pub struct Modulus {
     mod_bits: u64,
 }
 
-const PAR_CHUNK_SIZE: usize = 1 << 13;
-
 impl Modulus {
     pub fn new(modulus: u64) -> Modulus {
         // mu = 2^(2n+3) / modulus
@@ -325,9 +323,13 @@ impl Modulus {
 
     /// subracts a from b
     ///
-    /// Adding this because we don't haave a way to express that perform a - b but consume b, not a.
+    /// Adding this because we don't haave a way to express that perform b - a and consume a.
     pub fn sub_mod_fast_vec_reversed(&self, a: &mut [u64], b: &[u64]) {
+        #[cfg(not(feature = "hexl"))]
         izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.sub_mod_fast(*vb, *va));
+
+        #[cfg(feature = "hexl")]
+        hexl_rs::elwise_sub_reversed_mod(a, b, self.modulus, a.len() as u64)
     }
 
     pub fn mul_mod_naive_vec(&self, a: &mut [u64], b: &[u64]) {
@@ -336,18 +338,10 @@ impl Modulus {
 
     pub fn mul_mod_fast_vec(&self, a: &mut [u64], b: &[u64]) {
         #[cfg(not(feature = "hexl"))]
-        // a.par_chunks_mut(PAR_CHUNK_SIZE)
-        //     .zip(b.par_chunks(PAR_CHUNK_SIZE))
-        //     .for_each(|(a_chunk, b_chunk)| {
-        //         izip!(a_chunk.iter_mut(), b_chunk.iter())
-        //             .for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb))
-        //     });
-        // a.par_iter_mut()
-        //     .zip(b.par_iter())
-        //     .for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb));
         a.iter_mut()
             .zip(b.iter())
             .for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb));
+
         #[cfg(feature = "hexl")]
         hexl_rs::elwise_mult_mod(a, b, self.modulus, a.len() as u64, 1)
     }
