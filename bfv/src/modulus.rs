@@ -3,6 +3,8 @@ use num_bigint::U64Digits;
 use num_bigint_dig::{prime::probably_prime, BigUint};
 use num_traits::{One, ToPrimitive};
 use rand::{distributions::Uniform, CryptoRng, Rng, RngCore};
+use rayon::prelude::*;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Modulus {
     mu_hi: u64,
@@ -11,6 +13,8 @@ pub struct Modulus {
     modulus: u64,
     mod_bits: u64,
 }
+
+const PAR_CHUNK_SIZE: usize = 1 << 13;
 
 impl Modulus {
     pub fn new(modulus: u64) -> Modulus {
@@ -332,8 +336,18 @@ impl Modulus {
 
     pub fn mul_mod_fast_vec(&self, a: &mut [u64], b: &[u64]) {
         #[cfg(not(feature = "hexl"))]
-        izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb));
-
+        a.par_chunks_mut(PAR_CHUNK_SIZE)
+            .zip(b.par_chunks(PAR_CHUNK_SIZE))
+            .for_each(|(a_chunk, b_chunk)| {
+                izip!(a_chunk.iter_mut(), b_chunk.iter())
+                    .for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb))
+            });
+        // a.par_iter_mut()
+        //     .zip(b.par_iter())
+        //     .for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb));
+        // a.iter_mut()
+        //     .zip(b.iter())
+        //     .for_each(|(va, vb)| *va = self.mul_mod_fast(*va, *vb));
         #[cfg(feature = "hexl")]
         hexl_rs::elwise_mult_mod(a, b, self.modulus, a.len() as u64, 1)
     }

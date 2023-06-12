@@ -7,7 +7,6 @@ use num_traits::{FromPrimitive, ToPrimitive};
 use rand::{distributions::Uniform, thread_rng, Rng};
 use std::sync::Arc;
 
-
 fn switch_crt_basis() {
     let mut rng = thread_rng();
     let bfv_params = BfvParameters::default(15, 1 << 15);
@@ -274,9 +273,19 @@ fn barrett_reduction_u128() {
     }
 }
 
+fn mul_mod() {
+    let mut rng = thread_rng();
+    let modulus = Modulus::new(1152921504606748673);
+    let mut a = modulus.random_vec(1 << 15, &mut rng);
+    let b = modulus.random_vec(1 << 15, &mut rng);
+    for _ in 0..1000000 {
+        modulus.mul_mod_fast_vec(&mut a, &b);
+    }
+}
+
 fn main() {
     rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
+        .num_threads(4)
         .build_global()
         .unwrap();
     // switch_crt_basis();
@@ -288,5 +297,6 @@ fn main() {
     // approx_switch_crt_basis()
     // approx_mod_down();
     // barrett_reduction_u128();
-    mod_down_next();
+    // mod_down_next();
+    mul_mod();
 }

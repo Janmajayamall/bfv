@@ -840,13 +840,14 @@ where
         self.coefficients.slice_collapse(s![..q_size, ..]);
         debug_assert!(self.coefficients.shape()[0] == q_size);
 
+        // FIXME: don't parallelize across axis0 for vector arithmetic operations
         azip!(
             self.coefficients.outer_iter_mut(),
             p_to_q_coefficients.outer_iter(),
             q_context.moduli_ops.into_producer(),
             p_inv_modq.into_producer(),
         )
-        .par_for_each(|mut v, switched_v, modqi, p_inv_modqi| {
+        .for_each(|mut v, switched_v, modqi, p_inv_modqi| {
             modqi.sub_mod_fast_vec(v.as_slice_mut().unwrap(), switched_v.as_slice().unwrap());
             modqi.scalar_mul_mod_fast_vec(v.as_slice_mut().unwrap(), *p_inv_modqi);
         });
@@ -1012,7 +1013,7 @@ where
             rhs.coefficients.outer_iter().into_producer(),
             self.context.moduli_ops.into_producer()
         )
-        .par_for_each(|mut p, p2, modqi| {
+        .for_each(|mut p, p2, modqi| {
             modqi.mul_mod_fast_vec(p.as_slice_mut().unwrap(), p2.as_slice().unwrap());
         });
     }
