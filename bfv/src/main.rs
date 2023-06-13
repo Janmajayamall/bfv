@@ -273,6 +273,24 @@ fn barrett_reduction_u128() {
     }
 }
 
+fn poly_mul_assign() {
+    let mut rng = thread_rng();
+    let params = BfvParameters::default(4, 1 << 15);
+    let q_ctx = params.ciphertext_ctx_at_level(0);
+    let mut a = Poly::random(&q_ctx, &Representation::Evaluation, &mut rng);
+    let b = Poly::random(&q_ctx, &Representation::Evaluation, &mut rng);
+
+    for _ in 0..2000 {
+        let _ = &a * &b;
+    }
+
+    let now = std::time::Instant::now();
+    for _ in 0..100000 {
+        a *= &b;
+    }
+    println!("Time total: {:?}", now.elapsed() / 100000);
+}
+
 fn mul_mod() {
     let mut rng = thread_rng();
     let modulus = Modulus::new(1152921504606748673);
@@ -298,5 +316,6 @@ fn main() {
     // approx_mod_down();
     // barrett_reduction_u128();
     // mod_down_next();
-    mul_mod();
+    // mul_mod();
+    poly_mul_assign();
 }

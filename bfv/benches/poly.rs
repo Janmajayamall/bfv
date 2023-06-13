@@ -326,20 +326,22 @@ fn bench_poly(c: &mut Criterion) {
     }
 
     // Airthmetic operations1
-    let params = BfvParameters::default(8, 1 << 15);
-    let a0 = Poly::random(
-        &params.ciphertext_ctx_at_level(0),
-        &Representation::Evaluation,
-        &mut rng,
-    );
-    let a1 = Poly::random(
-        &params.ciphertext_ctx_at_level(0),
-        &Representation::Evaluation,
-        &mut rng,
-    );
-    group.bench_function(BenchmarkId::new("mul_assign", ""), |b| {
-        b.iter_batched(|| a0.clone(), |mut p| p *= &a1, batch_size)
-    });
+    for degree in [1 << 9, 1 << 13, 1 << 15] {
+        let params = BfvParameters::default(4, degree);
+        let a0 = Poly::random(
+            &params.ciphertext_ctx_at_level(0),
+            &Representation::Evaluation,
+            &mut rng,
+        );
+        let a1 = Poly::random(
+            &params.ciphertext_ctx_at_level(0),
+            &Representation::Evaluation,
+            &mut rng,
+        );
+        group.bench_function(BenchmarkId::new("mul_assign", format!("n={degree}")), |b| {
+            b.iter_batched(|| a0.clone(), |mut p| p *= &a1, batch_size)
+        });
+    }
 }
 
 criterion_group!(poly, bench_poly);

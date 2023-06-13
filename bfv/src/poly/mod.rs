@@ -1014,7 +1014,9 @@ where
             self.context.moduli_ops.into_producer()
         )
         .par_for_each(|mut p, p2, modqi| {
+            // let now = std::time::Instant::now();
             modqi.mul_mod_fast_vec(p.as_slice_mut().unwrap(), p2.as_slice().unwrap());
+            // println!("Time: {:?}", now.elapsed());
         });
     }
 }
