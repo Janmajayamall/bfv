@@ -20,7 +20,7 @@ use traits::Ntt;
 mod poly_hexl;
 
 // const UNROLL_BY = 8;
-const PAR_CHUNK_SIZE: usize = 1 << 13;
+const PAR_CHUNK_SIZE: usize = 1 << 3;
 
 #[derive(Clone, PartialEq, Debug, Eq)]
 pub enum Representation {

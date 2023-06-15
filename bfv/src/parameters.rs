@@ -6,6 +6,7 @@ use ndarray::Array2;
 use num_bigint::BigUint;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{Pow, ToPrimitive};
+use std::rc::Rc;
 use std::sync::Arc;
 use traits::Ntt;
 
@@ -58,7 +59,13 @@ pub struct BfvParameters<T: Ntt> {
     pub ql_hat_inv_modql_shoup: Vec<Vec<u64>>,
     pub ql_inv: Vec<Vec<f64>>,
     pub alphal_modp: Vec<Array2<u64>>,
+
     // Hybrid key switching
+    pub special_moduli: Vec<u64>,
+    pub special_moduli_ctx: Arc<PolyContext<T>>,
+    pub dnum: usize,
+    pub alpha: usize, // fixed to 3
+    pub aux_bits: usize,
 
     // Mod Down //
     pub lastq_inv_modq: Vec<Vec<u64>>,
@@ -525,9 +532,15 @@ where
         }
 
         let plaintext_modulus_op = Modulus::new(plaintext_modulus);
-
-        // TODO: change ModulusOld with Modulus
         let plaintext_ntt_op = T::new(polynomial_degree, plaintext_modulus);
+
+        // Hybrid key switching
+        const ALPHA: usize = 3;
+        let aux_bits = 60;
+        let dnum = (ciphertext_moduli.len() as f64 / ALPHA as f64).ceil() as usize;
+        let special_moduli =
+            generate_primes_vec(&[aux_bits; ALPHA], polynomial_degree, &ciphertext_moduli);
+        let special_moduli_ctx = Arc::new(PolyContext::new(&special_moduli, polynomial_degree));
 
         BfvParameters {
             ciphertext_moduli: ciphertext_moduli.into_boxed_slice(),
@@ -575,6 +588,13 @@ where
             alphal_modp,
             max_bit_size_by2: b,
             matrix_reps_index_map,
+
+            // Hybrid key switching //
+            special_moduli,
+            alpha: ALPHA,
+            dnum,
+            aux_bits,
+            special_moduli_ctx,
 
             // Mod down next //
             lastq_inv_modq,

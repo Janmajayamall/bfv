@@ -26,7 +26,7 @@ fn bench_poly(c: &mut Criterion) {
     let mut rng = thread_rng();
 
     rayon::ThreadPoolBuilder::new()
-        .num_threads(4)
+        .num_threads(1)
         .build_global()
         .unwrap();
     //TODO: add support for multiple polynomial degrees
@@ -326,7 +326,7 @@ fn bench_poly(c: &mut Criterion) {
     }
 
     // Airthmetic operations1
-    for degree in [1 << 9, 1 << 13, 1 << 15] {
+    for degree in [1 << 11, 1 << 13, 1 << 15] {
         let params = BfvParameters::default(4, degree);
         let a0 = Poly::random(
             &params.ciphertext_ctx_at_level(0),
@@ -339,7 +339,7 @@ fn bench_poly(c: &mut Criterion) {
             &mut rng,
         );
         group.bench_function(BenchmarkId::new("mul_assign", format!("n={degree}")), |b| {
-            b.iter_batched(|| a0.clone(), |mut p| p *= &a1, batch_size)
+            b.iter_batched(|| a0.clone(), |mut p| p *= &a1, BatchSize::PerIteration)
         });
     }
 }

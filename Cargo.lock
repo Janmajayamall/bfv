@@ -419,8 +419,6 @@ dependencies = [
  "bindgen",
  "cmake",
  "link-cplusplus",
- "rand",
- "traits 0.1.0 (git+https://github.com/Janmajayamall/bfv?branch=ntt-trait)",
 ]
 
 [[package]]
