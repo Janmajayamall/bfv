@@ -612,7 +612,7 @@ use fhe_math::zq::ntt::NttOperator;
 use hexl_rs::NttOperator;
 impl BfvParameters<NttOperator> {
     pub fn default(moduli_count: usize, polynomial_degree: usize) -> BfvParameters<NttOperator> {
-        BfvParameters::new(&vec![59; moduli_count], 65537, polynomial_degree)
+        BfvParameters::new(&vec![50; moduli_count], 65537, polynomial_degree)
     }
 }
 

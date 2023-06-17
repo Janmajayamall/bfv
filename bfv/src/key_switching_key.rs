@@ -379,8 +379,6 @@ where
         //     qj_moduli_parts.push(q_mod_ops.to_vec());
         // });
 
-        let parts = g.len();
-
         // qp = q + p moduli
         let qp_ctx = Arc::new(PolyContext::new(
             &[q_moduli.to_vec(), params.special_moduli.clone()].concat(),

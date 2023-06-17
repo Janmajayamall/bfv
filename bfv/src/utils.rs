@@ -15,7 +15,7 @@ macro_rules! warn {
 /// Retursn galois element correponding to desired rotation by i.
 ///
 /// Galois element: 3^i % M is will rotate left by i
-/// Galois element: 3^(N/2-1) will rotate right by i
+/// Galois element: 3^(N/2-i) will rotate right by i
 pub fn rot_to_galois_element(i: isize, n: usize) -> usize {
     let m = 2 * n;
     let modm = Modulus::new(m as u64);

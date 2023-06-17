@@ -856,19 +856,40 @@ where
         self.context = q_context.clone();
     }
 
+    /// Switches polynomial from Q to Q' and scales by 1/qn where Q = q0*q1*q2...*qn and Q' = q0*q1*q2...*q(n-1).
+    ///
+    /// Works for both coefficient and evaluation representation, but latter is expensive since you need to pay for
+    /// 1 + (n-1) NTT ops.
     pub fn mod_down_next(&mut self, last_qi_inv_modq: &[u64], new_ctx: &Arc<PolyContext<T>>) {
-        let (mut coeffs, p) = self
+        let (mut coeffs, mut p) = self
             .coefficients
             .view_mut()
             .split_at(Axis(0), self.context.moduli.len() - 1);
+
+        if self.representation == Representation::Evaluation {
+            // TODO: can we change this to lazy?
+            self.context
+                .ntt_ops
+                .last()
+                .unwrap()
+                .backward(p.as_slice_mut().unwrap());
+        }
+
         azip!(
             coeffs.outer_iter_mut().into_producer(),
             new_ctx.moduli_ops.into_producer(),
+            new_ctx.ntt_ops.into_producer(),
             last_qi_inv_modq.into_producer()
         )
-        .for_each(|mut ceoffs, modqi, last_qi_modqi| {
+        .for_each(|mut ceoffs, modqi, nttop, last_qi_modqi| {
             let mut tmp = p.to_owned();
             modqi.reduce_vec(tmp.as_slice_mut().unwrap());
+
+            if self.representation == Representation::Evaluation {
+                //TODO can we make this lazy as well?
+                nttop.forward(tmp.as_slice_mut().unwrap());
+            }
+
             modqi.sub_mod_fast_vec(ceoffs.as_slice_mut().unwrap(), tmp.as_slice().unwrap());
             modqi.scalar_mul_mod_fast_vec(ceoffs.as_slice_mut().unwrap(), *last_qi_modqi);
         });
@@ -1628,7 +1649,7 @@ mod tests {
         let params = BfvParameters::default(15, degree);
         let q_ctx = params.ciphertext_ctx_at_level(0);
 
-        let q_poly = Poly::random(&q_ctx, &Representation::Coefficient, &mut rng);
+        let mut q_poly = Poly::random(&q_ctx, &Representation::Evaluation, &mut rng);
 
         let last_qi = q_ctx.moduli.last().unwrap();
 
@@ -1637,7 +1658,9 @@ mod tests {
             &params.lastq_inv_modq[0],
             &params.ciphertext_ctx_at_level(1),
         );
+        q_res_poly.change_representation(Representation::Coefficient);
 
+        q_poly.change_representation(Representation::Coefficient);
         let q = q_ctx.modulus();
         let q_next = params.ciphertext_ctx_at_level(1).modulus();
         let p = *last_qi;
@@ -1658,7 +1681,7 @@ mod tests {
 
         izip!(Vec::<BigUint>::from(&q_res_poly), q_expected.iter()).for_each(|(res, expected)| {
             let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
-            // assert!(diff <= BigInt::one());
+            assert!(diff <= BigInt::one());
             dbg!(diff);
         });
     }
