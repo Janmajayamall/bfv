@@ -313,13 +313,13 @@ where
                     p_inv.push(1.0 / (pi as f64));
                 });
 
-                let mut alpha_modp = vec![];
-                for i in 0..(p_context.moduli.len() + 1) {
-                    let u_p = &p * i;
-                    q_context.moduli.iter().for_each(|qi| {
-                        alpha_modp.push((&u_p % *qi).to_u64().unwrap());
-                    });
-                }
+                let mut alpha_modq = vec![];
+                q_context.moduli.iter().for_each(|qi| {
+                    for i in 0..(p_context.moduli.len() + 1) {
+                        let u_p = &p * i;
+                        alpha_modq.push((&u_p % *qi).to_u64().unwrap());
+                    }
+                });
 
                 let mut p_hat_modq = vec![];
                 q_context.moduli.iter().for_each(|qi| {
@@ -341,7 +341,7 @@ where
                 alphal_modq.push(
                     Array2::from_shape_vec(
                         (p_context.moduli.len() + 1, q_context.moduli.len()),
-                        alpha_modp,
+                        alpha_modq,
                     )
                     .unwrap(),
                 )
@@ -469,12 +469,12 @@ where
                 });
 
                 let mut alpha_modp = vec![];
-                for i in 0..(q_context.moduli.len() + 1) {
-                    let u_q = &q * i;
-                    p_context.moduli.iter().for_each(|pi| {
+                p_context.moduli.iter().for_each(|pi| {
+                    for i in 0..(q_context.moduli.len() + 1) {
+                        let u_q = &q * i;
                         alpha_modp.push((&u_q % *pi).to_u64().unwrap());
-                    });
-                }
+                    }
+                });
 
                 let mut q_hat_modp = vec![];
                 p_context.moduli.iter().for_each(|pi| {
@@ -495,7 +495,7 @@ where
                 ql_inv.push(q_inv);
                 alphal_modp.push(
                     Array2::from_shape_vec(
-                        (q_context.moduli.len() + 1, p_context.moduli.len()),
+                        (p_context.moduli.len(), q_context.moduli.len() + 1),
                         alpha_modp,
                     )
                     .unwrap(),

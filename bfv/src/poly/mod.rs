@@ -20,7 +20,7 @@ use traits::Ntt;
 mod poly_hexl;
 
 // const UNROLL_BY = 8;
-const PAR_CHUNK_SIZE: usize = 1 << 3;
+const PAR_CHUNK_SIZE: usize = 1 << 15;
 
 #[derive(Clone, PartialEq, Debug, Eq)]
 pub enum Representation {
@@ -551,64 +551,59 @@ where
 
         let mut p_coeffs = Array2::uninit((p_size, degree));
 
-        p_coeffs
-            .axis_chunks_iter_mut(Axis(1), PAR_CHUNK_SIZE)
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(chunk_index, mut p_coeffs_chunk)| {
-                unsafe {
-                    for ri in (0..PAR_CHUNK_SIZE).step_by(8) {
-                        let mut xiq = Vec::with_capacity(q_size * 8);
-                        let uninit = xiq.spare_capacity_mut();
+        unsafe {
+            for ri in (0..degree).step_by(8) {
+                let mut xiq = Vec::with_capacity(q_size * 8);
+                let uninit = xiq.spare_capacity_mut();
 
-                        seq!(N in 0..8{
-                            // let mut xiq~N = Vec::with_capacity(q_size);
-                            let mut nu~N = 0.5f64;
-                        });
+                seq!(N in 0..8{
+                    // let mut xiq~N = Vec::with_capacity(q_size);
+                    let mut nu~N = 0.5f64;
+                });
 
-                        for i in 0..q_size {
-                            let mod_ref = modq_ops.get_unchecked(i);
-                            let op = *q_hat_inv_modq.get_unchecked(i);
-                            let op_shoup = *q_hat_inv_modq_shoup.get_unchecked(i);
-                            seq!(N in 0..8{
-                                let tmp~N = mod_ref.mul_mod_shoup(
-                                    *self.coefficients.uget((i, (chunk_index*PAR_CHUNK_SIZE) + ri + N)),
-                                    op,
-                                    op_shoup
-                                );
-                                nu~N += tmp~N as f64 * q_inv.get_unchecked(i);
-                                uninit.get_unchecked_mut(i*8+N).write(tmp~N);
-                            });
-                        }
-
-                        xiq.set_len(q_size * 8);
-
-                        for j in 0..p_size {
-                            // Why not set `tmp` as a vec of u128? Apparently calling `drop_in_place` afterwards on
-                            // `tmp` if it were a vec of u128s is more expensive than using tmp as 8 different variables.
-                            seq!(N in 0..8{
-                                let mut tmp~N = 0u128;
-                            });
-
-                            for i in 0..q_size {
-                                let op2 = *q_hat_modp.uget((j, i)) as u128;
-
-                                seq!(N in 0..8 {
-                                    tmp~N += *xiq.get_unchecked(i * 8 + N) as u128 * op2;
-
-                                });
-                            }
-
-                            let modpj = modp_ops.get_unchecked(j);
-
-                            seq!(N in 0..8 {
-                                let pxi~N = p_coeffs_chunk.uget_mut((j, ri + N)).write(modpj.barret_reduction_u128(tmp~N));
-                                *pxi~N = modpj.sub_mod_fast(*pxi~N, *alpha_modp.uget((nu~N as usize, j)));
-                            });
-                        }
-                    }
+                for i in 0..q_size {
+                    let mod_ref = modq_ops.get_unchecked(i);
+                    let op = q_hat_inv_modq.get_unchecked(i);
+                    let op_shoup = q_hat_inv_modq_shoup.get_unchecked(i);
+                    let q_invi = q_inv.get_unchecked(i);
+                    seq!(N in 0..8{
+                        let tmp~N = mod_ref.mul_mod_shoup(
+                            *self.coefficients.uget((i,ri + N)),
+                            *op,
+                            *op_shoup
+                        );
+                        nu~N += tmp~N as f64 * *q_invi;
+                        uninit.get_unchecked_mut(i*8+N).write(tmp~N);
+                    });
                 }
-            });
+
+                xiq.set_len(q_size * 8);
+
+                for j in 0..p_size {
+                    // Why not set `tmp` as a vec of u128? Apparently calling `drop_in_place` afterwards on
+                    // `tmp` if it were a vec of u128s is more expensive than using tmp as 8 different variables.
+                    seq!(N in 0..8{
+                        let mut tmp~N = 0u128;
+                    });
+
+                    for i in 0..q_size {
+                        let op2 = *q_hat_modp.uget((j, i)) as u128;
+
+                        seq!(N in 0..8 {
+                            tmp~N += *xiq.get_unchecked(i * 8 + N) as u128 * op2;
+
+                        });
+                    }
+
+                    let modpj = modp_ops.get_unchecked(j);
+
+                    seq!(N in 0..8 {
+                        let tmp = modpj.sub_mod_fast(modpj.barret_reduction_u128(tmp~N), *alpha_modp.uget((j,nu~N as usize)));
+                        p_coeffs.uget_mut((j, ri + N)).write(tmp);
+                    });
+                }
+            }
+        }
 
         unsafe {
             let p_coeffs = p_coeffs.assume_init();
