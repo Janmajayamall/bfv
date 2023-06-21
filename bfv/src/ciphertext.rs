@@ -4,7 +4,6 @@ use crate::warn;
 use crate::Plaintext;
 use itertools::Itertools;
 use ndarray::azip;
-use rayon::*;
 use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 use std::sync::Arc;
 use traits::Ntt;
@@ -391,11 +390,6 @@ mod tests {
 
     #[test]
     fn test_ciphertext_multiplication1() {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(1)
-            .build_global()
-            .unwrap();
-
         let mut rng = thread_rng();
         let params = Arc::new(BfvParameters::default(15, 1 << 15));
         let sk = SecretKey::random(&params, &mut rng);

@@ -340,7 +340,7 @@ where
                 pl_inv.push(p_inv);
                 alphal_modq.push(
                     Array2::from_shape_vec(
-                        (p_context.moduli.len() + 1, q_context.moduli.len()),
+                        (q_context.moduli.len(), p_context.moduli.len() + 1),
                         alpha_modq,
                     )
                     .unwrap(),

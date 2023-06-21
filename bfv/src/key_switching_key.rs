@@ -8,7 +8,7 @@ use crate::{
 use crypto_bigint::rand_core::CryptoRngCore;
 use fhe_math::zq::primes;
 use itertools::{izip, Itertools};
-use ndarray::{azip, par_azip, s, Array1, Array2, Array3, Axis, IntoNdProducer};
+use ndarray::{azip, s, Array1, Array2, Array3, Axis, IntoNdProducer};
 use num_bigint::{BigUint, ToBigInt};
 use num_bigint_dig::BigUint as BigUintDig;
 use num_bigint_dig::ModInverse;
@@ -639,7 +639,6 @@ mod tests {
     use crate::parameters::BfvParameters;
     use num_bigint::BigUint;
     use rand::thread_rng;
-    use rayon::prelude::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 
     #[test]
     fn key_switching_works() {
@@ -716,7 +715,7 @@ mod tests {
         res.change_representation(Representation::Coefficient);
         izip!(Vec::<BigUint>::from(&res).iter(),).for_each(|v| {
             let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.modulus() - v).bits());
-            // dbg!(diff_bits);
+            dbg!(diff_bits);
         });
     }
 
@@ -730,17 +729,12 @@ mod tests {
         let q = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
         let modop = Modulus::new(32);
 
-        // rayon::ThreadPoolBuilder::new()
-        //     .num_threads(10)
-        //     .build_global()
-        //     .unwrap();
-
         let now = std::time::Instant::now();
         azip!(
             p.coefficients.axis_iter_mut(Axis(1)),
             q.coefficients.axis_iter(Axis(1))
         )
-        .par_for_each(|mut a, b| {
+        .for_each(|mut a, b| {
             a[0] += modop.mul_mod_fast(a[0], b[0]);
             a[1] += modop.mul_mod_fast(a[1], b[1]);
             a[2] += modop.mul_mod_fast(a[2], b[2]);

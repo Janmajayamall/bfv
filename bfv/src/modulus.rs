@@ -3,7 +3,6 @@ use num_bigint::U64Digits;
 use num_bigint_dig::{prime::probably_prime, BigUint};
 use num_traits::{One, ToPrimitive};
 use rand::{distributions::Uniform, CryptoRng, Rng, RngCore};
-use rayon::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Modulus {

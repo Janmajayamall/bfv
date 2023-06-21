@@ -11,13 +11,12 @@ num-bigint-dig = {version = "0.8.2", features = ["prime"]}
 fhe-math = { git = "https://github.com/Janmajayamall/fhe.rs", branch = "compare" }
 fhe-util = { git = "https://github.com/Janmajayamall/fhe.rs", branch = "compare" }
 rand = "0.8.5"
-ndarray = {version = "0.15.6", features = ["rayon"]}
+ndarray = {version = "0.15.6"}
 itertools = "0.10.5"
 num-bigint = "0.4.3"
 num-traits = "0.2.15"
 crypto-bigint = "0.4.9"
 rand_chacha = "0.3.1"
-rayon = "1.7.0"
 seq-macro = "0.3"
 traits = {git = "https://github.com/Janmajayamall/bfv", branch="ntt-trait"}
 hexl-rs = {path = "./../../hexl-rs", optional = true}

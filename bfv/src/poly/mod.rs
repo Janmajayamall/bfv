@@ -1,14 +1,12 @@
 use crate::modulus::Modulus;
 use crypto_bigint::U192;
-use fhe_math::{zq::ntt::NttOperator, zq::Modulus as ModulusOld};
 use fhe_util::sample_vec_cbd;
 use itertools::{izip, Itertools};
 use ndarray::{azip, s, Array2, ArrayView2, Axis, IntoNdProducer};
-use num_bigint::{BigInt, BigUint};
+use num_bigint::BigUint;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{identities::One, ToPrimitive, Zero};
-use rand::{seq, CryptoRng, RngCore};
-use rayon::prelude::*;
+use rand::{CryptoRng, RngCore};
 use seq_macro::seq;
 use std::{
     mem::{self, MaybeUninit},
@@ -18,9 +16,6 @@ use std::{
 use traits::Ntt;
 
 mod poly_hexl;
-
-// const UNROLL_BY = 8;
-const PAR_CHUNK_SIZE: usize = 1 << 15;
 
 #[derive(Clone, PartialEq, Debug, Eq)]
 pub enum Representation {
@@ -83,7 +78,7 @@ where
             g.push(qh * qhi);
         });
 
-        let mut bit_reverse = (0..degree)
+        let bit_reverse = (0..degree)
             .map(|v| v.reverse_bits() >> (degree.leading_zeros() + 1))
             .collect_vec()
             .into_boxed_slice();
@@ -218,7 +213,7 @@ where
                     self.coefficients.outer_iter_mut(),
                     self.context.ntt_ops.into_producer()
                 )
-                .par_for_each(|mut coefficients, ntt| {
+                .for_each(|mut coefficients, ntt| {
                     ntt.backward(coefficients.as_slice_mut().unwrap())
                 });
                 self.representation = Representation::Coefficient;
@@ -230,7 +225,7 @@ where
                     self.coefficients.outer_iter_mut(),
                     self.context.ntt_ops.into_producer()
                 )
-                .par_for_each(|mut coefficients, ntt| {
+                .for_each(|mut coefficients, ntt| {
                     // TODO: switch between native and hexl
                     ntt.forward(coefficients.as_slice_mut().unwrap())
                 });
@@ -313,7 +308,6 @@ where
         let t_values = self
             .coefficients
             .axis_iter(Axis(1))
-            .into_par_iter()
             .map(|rests| {
                 let mut rational_sum = 0u64;
                 let mut fractional_sum = 0f64;
@@ -381,63 +375,57 @@ where
         let modos = out_context.moduli_ops.as_ref();
 
         let mut o_coeffs = Array2::<u64>::uninit((output_size, degree));
-        o_coeffs
-            .axis_chunks_iter_mut(Axis(1), PAR_CHUNK_SIZE)
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(chunk_index, mut o_coeffs_chunk)| {
-                unsafe {
-                    for ri in (0..PAR_CHUNK_SIZE).step_by(8) {
-                        seq!(N in 0..8 {
-                            let mut frac~N = U192::ZERO;
-                        });
+        unsafe {
+            for ri in (0..degree).step_by(8) {
+                seq!(N in 0..8 {
+                    let mut frac~N = U192::ZERO;
+                });
 
-                        for i in 0..input_size {
-                            let fhi = *to_s_hat_inv_mods_divs_frachi.get_unchecked(i) as u128;
-                            let flo = *to_s_hat_inv_mods_divs_fraclo.get_unchecked(i) as u128;
+                for i in 0..input_size {
+                    let fhi = *to_s_hat_inv_mods_divs_frachi.get_unchecked(i) as u128;
+                    let flo = *to_s_hat_inv_mods_divs_fraclo.get_unchecked(i) as u128;
 
-                            seq!(N in 0..8 {
-                                let xi = *self.coefficients.uget((i + input_offset,chunk_index*PAR_CHUNK_SIZE + ri+N));
-                                let lo = xi as u128 * flo;
-                                let hi = xi as u128 * fhi + (lo >> 64);
-                                frac~N = frac~N.wrapping_add(&U192::from_words([
-                                    lo as u64,
-                                    hi as u64,
-                                    (hi >> 64) as u64,
-                                ]));
-                            });
-                        }
-
-                        seq!(N in 0..8 {
-                            let frac~N = frac~N.shr_vartime(127).as_words()[0] as u128;
-                        });
-
-                        for j in 0..output_size {
-                            seq!(N in 0..8 {
-                                let mut tmp~N = frac~N;
-                            });
-
-                            for i in 0..input_size {
-                                let op = *to_s_hat_inv_mods_divs_modo.uget((j, i)) as u128;
-
-                                seq!(N in 0..8 {
-                                    tmp~N += *self.coefficients.uget((i + input_offset,chunk_index*PAR_CHUNK_SIZE + ri+N)) as u128 * op;
-                                });
-                            }
-
-                            let modoj = modos.get_unchecked(j);
-
-                            let op = *to_s_hat_inv_mods_divs_modo.uget((j, input_size)) as u128;
-
-                            seq!(N in 0..8 {
-                                tmp~N += *self.coefficients.uget((j + output_offset,chunk_index*PAR_CHUNK_SIZE + ri+N)) as u128 * op;
-                                let pxj = modoj.barret_reduction_u128(tmp~N);
-                                o_coeffs_chunk.uget_mut((j, ri+N)).write(pxj);
-                            });
-                        }
-                    }
+                    seq!(N in 0..8 {
+                        let xi = *self.coefficients.uget((i + input_offset, ri+N));
+                        let lo = xi as u128 * flo;
+                        let hi = xi as u128 * fhi + (lo >> 64);
+                        frac~N = frac~N.wrapping_add(&U192::from_words([
+                            lo as u64,
+                            hi as u64,
+                            (hi >> 64) as u64,
+                        ]));
+                    });
                 }
-            });
+
+                seq!(N in 0..8 {
+                    let frac~N = frac~N.shr_vartime(127).as_words()[0] as u128;
+                });
+
+                for j in 0..output_size {
+                    seq!(N in 0..8 {
+                        let mut tmp~N = frac~N;
+                    });
+
+                    for i in 0..input_size {
+                        let op = *to_s_hat_inv_mods_divs_modo.uget((j, i)) as u128;
+
+                        seq!(N in 0..8 {
+                            tmp~N += *self.coefficients.uget((i + input_offset, ri+N)) as u128 * op;
+                        });
+                    }
+
+                    let modoj = modos.get_unchecked(j);
+
+                    let op = *to_s_hat_inv_mods_divs_modo.uget((j, input_size)) as u128;
+
+                    seq!(N in 0..8 {
+                        tmp~N += *self.coefficients.uget((j + output_offset, ri+N)) as u128 * op;
+                        let pxj = modoj.barret_reduction_u128(tmp~N);
+                        o_coeffs.uget_mut((j, ri+N)).write(pxj);
+                    });
+                }
+            }
+        }
 
         unsafe {
             let o_coeffs = o_coeffs.assume_init();
@@ -471,59 +459,53 @@ where
         let modps = p_context.moduli_ops.as_ref();
 
         let mut p_coeffs = Array2::<u64>::uninit((p_size, degree));
-        p_coeffs
-            .axis_chunks_iter_mut(Axis(1), PAR_CHUNK_SIZE)
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(chunk_index, mut p_coeffs_chunk)| {
-            unsafe {
-                //
-                for ri in (0..PAR_CHUNK_SIZE).step_by(8) {
-                    let mut xiv = Vec::with_capacity(q_size * 8);
-                    let uninit_xiv = xiv.spare_capacity_mut();
+        unsafe {
+            //
+            for ri in (0..degree).step_by(8) {
+                let mut xiv = Vec::with_capacity(q_size * 8);
+                let uninit_xiv = xiv.spare_capacity_mut();
 
+                seq!(N in 0..8 {
+                    let mut nu~N = 0.5f64;
+                });
+
+                for i in 0..q_size {
+                    let modqi = modqs.get_unchecked(i);
+                    let op = *neg_pq_hat_inv_modq.get_unchecked(i);
+                    let op_shoup = *neg_pq_hat_inv_modq_shoup.get_unchecked(i);
+                    let qi_inv = q_inv.get_unchecked(i);
                     seq!(N in 0..8 {
-                        let mut nu~N = 0.5f64;
+                        let tmp~N = modqi.mul_mod_shoup(*self.coefficients.uget((i, ri+N)), op, op_shoup);
+                        nu~N += tmp~N as f64 * qi_inv;
+                        uninit_xiv.get_unchecked_mut(i*8+N).write(tmp~N);
                     });
+                }
 
+                xiv.set_len(q_size * 8);
+                seq!(N in 0..8 {
+                    let nu~N = nu~N as u64;
+                });
+
+                for j in 0..p_size {
+                    seq!(N in 0..8 {
+                        let mut tmp~N = 0u128;
+                    });
                     for i in 0..q_size {
-                        let modqi = modqs.get_unchecked(i);
-                        let op = *neg_pq_hat_inv_modq.get_unchecked(i);
-                        let op_shoup = *neg_pq_hat_inv_modq_shoup.get_unchecked(i);
-                        let qi_inv = q_inv.get_unchecked(i);
+                        let op = *q_inv_modp.uget((j, i)) as u128;
+
                         seq!(N in 0..8 {
-                            let tmp~N = modqi.mul_mod_shoup(*self.coefficients.uget((i,chunk_index*PAR_CHUNK_SIZE + ri+N)), op, op_shoup);
-                            nu~N += tmp~N as f64 * qi_inv;
-                            uninit_xiv.get_unchecked_mut(i*8+N).write(tmp~N);
+                            tmp~N += *xiv.get_unchecked(i * 8 + N) as u128 * op;
                         });
                     }
 
-                    xiv.set_len(q_size * 8);
+                    let modpj = modps.get_unchecked(j);
                     seq!(N in 0..8 {
-                        let nu~N = nu~N as u64;
+                        let pxj = p_coeffs.uget_mut((j, ri+N)).write(modpj.barret_reduction_u128(tmp~N));
+                        *pxj = modpj.sub_mod_fast(*pxj, nu~N);
                     });
-
-                    for j in 0..p_size {
-                        seq!(N in 0..8 {
-                            let mut tmp~N = 0u128;
-                        });
-                        for i in 0..q_size {
-                            let op = *q_inv_modp.uget((j, i)) as u128;
-
-                            seq!(N in 0..8 {
-                                tmp~N += *xiv.get_unchecked(i * 8 + N) as u128 * op;
-                            });
-                        }
-
-                        let modpj = modps.get_unchecked(j);
-                        seq!(N in 0..8 {
-                            let pxj = p_coeffs_chunk.uget_mut((j, ri+N)).write(modpj.barret_reduction_u128(tmp~N));
-                            *pxj = modpj.sub_mod_fast(*pxj, nu~N);
-                        });
-                    }
                 }
             }
-        });
+        }
 
         unsafe {
             let p_coeffs = p_coeffs.assume_init();
@@ -647,7 +629,7 @@ where
         };
 
         // switch p to q
-        let mut q = p.switch_crt_basis(
+        let q = p.switch_crt_basis(
             &self.context,
             p_hat_modq,
             p_hat_inv_modp,
@@ -733,50 +715,43 @@ where
         let p_size = p_moduli_ops.len();
         let q_size = q_coefficients.shape()[0];
 
-        p_coeffs
-            .axis_chunks_iter_mut(Axis(1), PAR_CHUNK_SIZE)
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(chunk_index, mut p_coeffs_chunk)| {
-                unsafe {
-                    for ri in (0..PAR_CHUNK_SIZE).step_by(8) {
-                        let mut tmp: [MaybeUninit<u64>; 3 * 8] =
-                            MaybeUninit::uninit().assume_init();
+        unsafe {
+            for ri in (0..degree).step_by(8) {
+                let mut tmp: [MaybeUninit<u64>; 3 * 8] = MaybeUninit::uninit().assume_init();
 
-                        for i in 0..q_size {
-                            let modq = q_moduli_ops.get_unchecked(i);
-                            let op = *q_hat_inv_modq.get_unchecked(i);
+                for i in 0..q_size {
+                    let modq = q_moduli_ops.get_unchecked(i);
+                    let op = *q_hat_inv_modq.get_unchecked(i);
 
-                            seq!(N in 0..8 {
-                                tmp.get_unchecked_mut(i*8+N)
-                                .write(modq.mul_mod_fast(*q_coefficients.uget((i,chunk_index*PAR_CHUNK_SIZE + ri+N)), op));
-                            });
-                        }
-                        // tmp.set_len(q_size);
-
-                        let tmp = mem::transmute::<_, [u64; 3 * 8]>(tmp);
-                        for j in 0..p_size {
-                            seq!(N in 0..8 {
-                                let mut s~N = 0u128;
-                            });
-
-                            for i in 0..q_size {
-                                let op = *q_hat_modp.uget((i, j)) as u128;
-                                seq!(N in 0..8 {
-                                    s~N += *tmp.get_unchecked(i*8+N) as u128 * op;
-                                });
-                            }
-
-                            let modpj = p_moduli_ops.get_unchecked(j);
-                            seq!(N in 0..8 {
-                                p_coeffs_chunk
-                                .uget_mut((j, ri+N))
-                                .write(modpj.barret_reduction_u128(s~N));
-                            });
-                        }
-                    }
+                    seq!(N in 0..8 {
+                        tmp.get_unchecked_mut(i*8+N)
+                        .write(modq.mul_mod_fast(*q_coefficients.uget((i, ri+N)), op));
+                    });
                 }
-            });
+                // tmp.set_len(q_size);
+
+                let tmp = mem::transmute::<_, [u64; 3 * 8]>(tmp);
+                for j in 0..p_size {
+                    seq!(N in 0..8 {
+                        let mut s~N = 0u128;
+                    });
+
+                    for i in 0..q_size {
+                        let op = *q_hat_modp.uget((i, j)) as u128;
+                        seq!(N in 0..8 {
+                            s~N += *tmp.get_unchecked(i*8+N) as u128 * op;
+                        });
+                    }
+
+                    let modpj = p_moduli_ops.get_unchecked(j);
+                    seq!(N in 0..8 {
+                        p_coeffs
+                        .uget_mut((j, ri+N))
+                        .write(modpj.barret_reduction_u128(s~N));
+                    });
+                }
+            }
+        }
 
         unsafe {
             return p_coeffs.assume_init();
@@ -809,7 +784,7 @@ where
             // skip first `q_size` ntt ops
             p_context.ntt_ops.into_producer()
         )
-        .par_for_each(|mut v, ntt_op| {
+        .for_each(|mut v, ntt_op| {
             ntt_op.backward(v.as_slice_mut().unwrap());
         });
 
@@ -828,7 +803,7 @@ where
             p_to_q_coefficients.outer_iter_mut(),
             q_context.ntt_ops.into_producer()
         )
-        .par_for_each(|mut v, ntt_op| {
+        .for_each(|mut v, ntt_op| {
             ntt_op.forward(v.as_slice_mut().unwrap());
         });
 
@@ -902,7 +877,7 @@ where
             p2.coefficients.outer_iter(),
             self.context.moduli_ops.into_producer()
         )
-        .par_for_each(|mut a, b, c, modqi| {
+        .for_each(|mut a, b, c, modqi| {
             modqi.fma_reverse_vec(
                 a.as_slice_mut().unwrap(),
                 b.as_slice().unwrap(),
@@ -926,7 +901,7 @@ where
             p.coefficients.outer_iter(),
             self.context.moduli_ops.into_producer()
         )
-        .par_for_each(|mut a, b, modqi| {
+        .for_each(|mut a, b, modqi| {
             modqi.sub_mod_fast_vec_reversed(a.as_slice_mut().unwrap(), b.as_slice().unwrap());
         });
     }
@@ -936,7 +911,7 @@ where
             self.coefficients.outer_iter_mut(),
             self.context.moduli_ops.into_producer()
         )
-        .par_for_each(|mut coeffs, modqi| {
+        .for_each(|mut coeffs, modqi| {
             modqi.neg_mod_fast_vec(coeffs.as_slice_mut().unwrap());
         });
     }
@@ -984,7 +959,7 @@ where
             rhs.coefficients.outer_iter(),
             self.context.moduli_ops.into_producer()
         )
-        .par_for_each(|mut p1, p2, q| {
+        .for_each(|mut p1, p2, q| {
             q.sub_mod_fast_vec(p1.as_slice_mut().unwrap(), p2.as_slice().unwrap())
         });
     }
@@ -1029,7 +1004,7 @@ where
             rhs.coefficients.outer_iter().into_producer(),
             self.context.moduli_ops.into_producer()
         )
-        .par_for_each(|mut p, p2, modqi| {
+        .for_each(|mut p, p2, modqi| {
             // let now = std::time::Instant::now();
             modqi.mul_mod_fast_vec(p.as_slice_mut().unwrap(), p2.as_slice().unwrap());
             // println!("Time: {:?}", now.elapsed());
@@ -1065,7 +1040,7 @@ where
             p.coefficients.outer_iter_mut(),
             poly_context.moduli_ops.into_producer()
         )
-        .par_for_each(|mut qi_values, qi| {
+        .for_each(|mut qi_values, qi| {
             let mut xi = values.to_vec();
             qi.reduce_vec(&mut xi);
             qi_values.as_slice_mut().unwrap().copy_from_slice(&xi);
@@ -1147,13 +1122,11 @@ where
 mod tests {
     use super::*;
     use crate::{nb_theory::generate_primes_vec, parameters::BfvParameters};
-    use num_bigint::ToBigInt;
+    use fhe_math::zq::ntt::NttOperator;
+    use num_bigint::{BigInt, ToBigInt};
     use num_bigint_dig::UniformBigUint;
     use num_traits::{FromPrimitive, Zero};
-    use rand::{
-        distributions::{uniform::UniformSampler, Uniform},
-        thread_rng, Rng,
-    };
+    use rand::{distributions::Uniform, rngs::ThreadRng, thread_rng, Rng};
 
     #[test]
     pub fn test_poly_to_biguint() {
@@ -1232,10 +1205,6 @@ mod tests {
     #[test]
     // FIXME: fails in debug mode. Check fn to see why.
     fn test_scale_and_round_decryption() {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(10)
-            .build_global()
-            .unwrap();
         let mut rng = thread_rng();
         let bfv_params = BfvParameters::default(10, 1 << 3);
 
@@ -1276,7 +1245,7 @@ mod tests {
     #[test]
     pub fn test_fast_conv_p_over_q() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::default(10, 1 << 15);
+        let bfv_params = BfvParameters::default(10, 1 << 4);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -1309,18 +1278,13 @@ mod tests {
             })
             .collect();
 
-        izip!(Vec::<BigUint>::from(&p_poly).iter(), p_expected.iter()).for_each(
-            |(res, expected)| {
-                let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
-                assert!(diff.bits() == 0);
-            },
-        );
+        assert_eq!(Vec::<BigUint>::from(&p_poly), p_expected);
     }
 
     #[test]
     pub fn test_switch_crt_basis() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::default(10, 1 << 15);
+        let bfv_params = BfvParameters::default(10, 1 << 4);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -1356,7 +1320,7 @@ mod tests {
     #[test]
     pub fn test_fast_expand_crt_basis_p_over_q() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::default(10, 1 << 3);
+        let bfv_params = BfvParameters::default(10, 1 << 4);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -1397,18 +1361,13 @@ mod tests {
             })
             .collect();
 
-        izip!(Vec::<BigUint>::from(&pq_poly).iter(), p_expected.iter()).for_each(
-            |(res, expected)| {
-                let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
-                dbg!(diff.bits());
-            },
-        );
+        assert_eq!(Vec::<BigUint>::from(&pq_poly), p_expected);
     }
 
     #[test]
     pub fn test_scale_and_round() {
         let mut rng = thread_rng();
-        let bfv_params = BfvParameters::default(10, 1 << 13);
+        let bfv_params = BfvParameters::default(10, 1 << 4);
 
         let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
         let p_context = bfv_params.extension_poly_contexts[0].clone();
@@ -1458,7 +1417,7 @@ mod tests {
     #[test]
     pub fn test_approx_switch_crt_basis() {
         let mut rng = thread_rng();
-        let polynomial_degree = 1 << 15;
+        let polynomial_degree = 1 << 4;
         let p_moduli = generate_primes_vec(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
         let q_moduli = p_moduli[..3].to_vec();
 
@@ -1496,7 +1455,6 @@ mod tests {
             Array2::<u64>::from_shape_vec((q_context.moduli.len(), p_moduli.len()), q_hat_modp)
                 .unwrap();
 
-        let mut rng = thread_rng();
         let q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
 
         let now = std::time::Instant::now();
@@ -1535,7 +1493,7 @@ mod tests {
     #[test]
     pub fn test_approx_mod_down() {
         let mut rng = thread_rng();
-        let polynomial_degree = 1 << 15;
+        let polynomial_degree = 1 << 4;
         let q_moduli = generate_primes_vec(&vec![60, 60, 60, 60, 60, 60], polynomial_degree, &[]);
         let p_moduli = generate_primes_vec(&vec![60], polynomial_degree, &q_moduli);
         let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
@@ -1632,15 +1590,15 @@ mod tests {
 
         izip!(Vec::<BigUint>::from(&q_res), q_expected.iter()).for_each(|(res, expected)| {
             let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
-            // assert!(diff <= BigInt::one());
-            dbg!(diff);
+            assert!(diff <= BigInt::one());
+            // dbg!(diff);
         });
     }
 
     #[test]
     pub fn test_mod_down_next() {
         let mut rng = thread_rng();
-        let degree = 1 << 3;
+        let degree = 1 << 4;
         let params = BfvParameters::default(15, degree);
         let q_ctx = params.ciphertext_ctx_at_level(0);
 
@@ -1677,14 +1635,7 @@ mod tests {
         izip!(Vec::<BigUint>::from(&q_res_poly), q_expected.iter()).for_each(|(res, expected)| {
             let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
             assert!(diff <= BigInt::one());
-            dbg!(diff);
+            // dbg!(diff);
         });
-    }
-
-    #[test]
-    fn test_one() {
-        let mut arr = Array2::<u64>::zeros((5, 5));
-        arr.slice_collapse(s![..3, ..]);
-        dbg!(arr.shape());
     }
 }

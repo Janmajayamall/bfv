@@ -41,7 +41,6 @@ dependencies = [
  "num-traits",
  "rand",
  "rand_chacha",
- "rayon",
  "seq-macro",
  "traits 0.1.0 (git+https://github.com/Janmajayamall/bfv?branch=ntt-trait)",
 ]
@@ -549,7 +548,6 @@ dependencies = [
  "num-integer",
  "num-traits",
  "rawpointer",
- "rayon",
 ]
 
 [[package]]

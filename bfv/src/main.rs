@@ -302,10 +302,6 @@ fn mul_mod() {
 }
 
 fn main() {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(4)
-        .build_global()
-        .unwrap();
     // switch_crt_basis();
     // scale_and_round();
     // fast_conv_p_over_q();
