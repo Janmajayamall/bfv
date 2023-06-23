@@ -15,6 +15,7 @@ use std::{
 };
 use traits::Ntt;
 
+pub mod poly_context;
 mod poly_hexl;
 
 #[derive(Clone, PartialEq, Debug, Eq)]
@@ -110,6 +111,7 @@ where
 pub struct Substitution {
     exponent: usize,
     power_bitrev: Box<[usize]>,
+    bit_rev: Box<[usize]>,
     degree: usize,
 }
 

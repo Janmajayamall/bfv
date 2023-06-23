@@ -1,6 +1,7 @@
-use num_traits::ToPrimitive;
-
 use crate::Modulus;
+use num_bigint::BigUint;
+use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
+use num_traits::ToPrimitive;
 
 #[macro_export]
 macro_rules! warn {
@@ -24,6 +25,19 @@ pub fn rot_to_galois_element(i: isize, n: usize) -> usize {
     } else {
         modm.exp(3, n / 2 - (i.abs().to_usize().unwrap())) as usize
     }
+}
+
+pub fn mod_inverse_biguint(a: &BigUint, m: &BigUint) -> BigUint {
+    let a_dig = BigUintDig::from_bytes_le(&a.to_bytes_le());
+    let m_dig = BigUintDig::from_bytes_le(&m.to_bytes_le());
+    BigUint::from_bytes_le(
+        &a_dig
+            .mod_inverse(m_dig)
+            .unwrap()
+            .to_biguint()
+            .unwrap()
+            .to_bytes_le(),
+    )
 }
 
 #[cfg(test)]
