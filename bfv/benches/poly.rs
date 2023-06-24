@@ -34,7 +34,7 @@ fn bench_poly(c: &mut Criterion) {
         let qp_ctx = params.poly_ctx(&PolyType::QP, level);
 
         let q_poly = q_ctx.random(Representation::Coefficient, &mut rng);
-        dbg!(q_poly.coefficients.shape());
+
         group.bench_function(
             BenchmarkId::new(
                 "scale_and_round_decryption",
@@ -162,13 +162,13 @@ fn bench_poly(c: &mut Criterion) {
             },
         );
 
-        // We need to special handle case for approx_switch_crt_basis and approx_mod_down. For approx_switch_crt_basis
-        // we generate a polynomial in specialP basis (moduli chain of length 3) and switch it to QP basis. This imitates the behaviour
-        // of approx_switch_crt_basis in hybrid key switching, where a polynomial with moduli chain of 3 is switched to QP.
+        // We need to additonal pre-computes for approx_switch_crt_basis and approx_mod_down. For approx_switch_crt_basis
+        // we generate a polynomial in specialP basis (moduli chain of length 3) and switch it to Q basis. This imitates the behaviour
+        // of approx_switch_crt_basis in hybrid key switching, where a polynomial with moduli chain of 3 is switched to polynomial with moduli chain of atmost size Q.
         // For approx_mod_down we switch a polynomial in QP basis to Q basis. This again imitates the expected behaviour
         // of approx_mod_down in hybrid key switching.
         {
-            let specialp_ctx = params.poly_ctx(&PolyType::P, level);
+            let specialp_ctx = params.poly_ctx(&PolyType::SpecialP, level);
             let p = specialp_ctx.big_q();
             let mut p_hat_inv_modp = vec![];
             let mut p_hat_modq = vec![];
@@ -179,18 +179,19 @@ fn bench_poly(c: &mut Criterion) {
                         .unwrap(),
                 );
             });
-            qp_ctx.iter_moduli_ops().for_each(|modqj| {
+            q_ctx.iter_moduli_ops().for_each(|modqj| {
                 specialp_ctx.iter_moduli_ops().for_each(|(modpi)| {
                     p_hat_modq.push(((&p / modpi.modulus()) % modqj.modulus()).to_u64().unwrap());
                 });
             });
             let p_hat_modq = Array2::from_shape_vec(
-                (qp_ctx.moduli_count(), specialp_ctx.moduli_count()),
+                (q_ctx.moduli_count(), specialp_ctx.moduli_count()),
                 p_hat_modq,
             )
             .unwrap();
+
             let mut p_inv_modq = vec![];
-            qp_ctx.iter_moduli_ops().for_each(|modqi| {
+            q_ctx.iter_moduli_ops().for_each(|modqi| {
                 p_inv_modq.push(
                     mod_inverse_biguint_u64(&p, modqi.modulus())
                         .to_u64()
@@ -207,7 +208,7 @@ fn bench_poly(c: &mut Criterion) {
                         degree,
                         &p_hat_inv_modp,
                         &p_hat_modq,
-                        qp_ctx.moduli_ops(),
+                        q_ctx.moduli_ops(),
                     );
                 })
             });
