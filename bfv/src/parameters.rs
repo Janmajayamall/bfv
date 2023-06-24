@@ -1,6 +1,6 @@
 use crate::modulus::Modulus;
 use crate::nb_theory::generate_primes_vec;
-use crate::poly::{poly_context::PolyContext2, Poly, PolyContext, Representation};
+use crate::poly::{poly_context::PolyContext, Poly, PolyContext, Representation};
 use crate::utils::mod_inverse_biguint;
 use itertools::{izip, Itertools};
 use ndarray::{Array2, Array3};
@@ -584,22 +584,22 @@ where
         }
     }
 
-    pub fn poly_ctx(&self, poly_type: &PolyType, level: usize) -> PolyContext2<'_, T> {
+    pub fn poly_ctx(&self, poly_type: &PolyType, level: usize) -> PolyContext<'_, T> {
         let level_index = self.q_size - level;
         match poly_type {
-            PolyType::Q => PolyContext2 {
+            PolyType::Q => PolyContext {
                 moduli_ops: self.ciphertext_moduli_ops[..level_index].iter(),
                 ntt_ops: self.ciphertext_ntt_ops[..level_index].iter(),
                 moduli_count: level_index,
                 degree: self.degree,
             },
-            PolyType::P => PolyContext2 {
+            PolyType::P => PolyContext {
                 moduli_ops: self.extension_moduli_ops[..level_index].iter(),
                 ntt_ops: self.extension_ntt_ops[..level_index].iter(),
                 moduli_count: level_index,
                 degree: self.degree,
             },
-            PolyType::PQ => PolyContext2 {
+            PolyType::PQ => PolyContext {
                 moduli_ops: self.extension_moduli_ops[..level_index]
                     .iter()
                     .chain(self.ciphertext_moduli_ops[..level_index].iter()),
@@ -609,13 +609,13 @@ where
                 moduli_count: level_index * 2,
                 degree: self.degree,
             },
-            PolyType::SpecialP => PolyContext2 {
+            PolyType::SpecialP => PolyContext {
                 moduli_ops: (self.special_moduli_ops.as_slice(), &[]),
                 ntt_ops: (self.special_moduli_ntt_ops.as_slice(), &[]),
                 moduli_count: self.alpha,
                 degree: self.degree,
             },
-            PolyType::QP => PolyContext2 {
+            PolyType::QP => PolyContext {
                 moduli_ops: self.ciphertext_moduli_ops[..level_index]
                     .iter()
                     .chain(self.special_moduli_ops.iter()),

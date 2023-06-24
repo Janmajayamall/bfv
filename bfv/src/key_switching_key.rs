@@ -1,4 +1,5 @@
 use crate::modulus::Modulus;
+use crate::utils::mod_inverse_biguint;
 use crate::BfvParameters;
 use crate::{
     nb_theory::generate_prime,
@@ -10,6 +11,7 @@ use fhe_math::zq::primes;
 use itertools::{izip, Itertools};
 use ndarray::{azip, s, Array1, Array2, Array3, Axis, IntoNdProducer};
 use num_bigint::{BigUint, ToBigInt};
+use num_bigint_dig::algorithms::mod_inverse;
 use num_bigint_dig::BigUint as BigUintDig;
 use num_bigint_dig::ModInverse;
 use num_traits::{FromPrimitive, One, ToPrimitive};
@@ -18,56 +20,50 @@ use rand_chacha::ChaCha8Rng;
 use std::sync::Arc;
 use traits::Ntt;
 
-struct BVKeySwitchingKey<T: Ntt> {
-    c0s: Box<[Poly<T>]>,
-    c1s: Box<[Poly<T>]>,
+struct BVKeySwitchingKey {
+    c0s: Box<[Poly]>,
+    c1s: Box<[Poly]>,
     seed: <ChaCha8Rng as SeedableRng>::Seed,
-    ciphertext_ctx: Arc<PolyContext<T>>,
-    ksk_ctx: Arc<PolyContext<T>>,
 }
 
-impl<T> BVKeySwitchingKey<T>
+impl<T> BVKeySwitchingKey
 where
     T: Ntt,
 {
     pub fn new<R: CryptoRng + CryptoRngCore>(
-        poly: &Poly<T>,
-        sk: &SecretKey<T>,
-        ciphertext_ctx: &Arc<PolyContext<T>>,
+        poly: &Poly,
+        sk: &SecretKey,
+        ksk_ctx: &PolyContext<'_, T>,
         rng: &mut R,
-    ) -> BVKeySwitchingKey<T> {
+    ) -> BVKeySwitchingKey {
         // check that ciphertext context has more than on moduli, otherwise key switching does not makes sense
-        debug_assert!(ciphertext_ctx.moduli.len() > 1);
-
-        let ksk_ctx = &poly.context;
+        debug_assert!(ksk_ctx.moduli_count > 1);
 
         // c1s
         let mut seed = <ChaCha8Rng as SeedableRng>::Seed::default();
         rng.fill_bytes(&mut seed);
-        let c1s = Self::generate_c1(ciphertext_ctx.moduli.len(), ksk_ctx, seed);
-        let c0s = Self::generate_c0(ciphertext_ctx, ksk_ctx, poly, &c1s, sk, rng);
+        let c1s = Self::generate_c1(ksk_ctx, seed);
+        let c0s = Self::generate_c0(ksk_ctx, poly, &c1s, sk, rng);
 
         BVKeySwitchingKey {
             c0s: c0s.into_boxed_slice(),
             c1s: c1s.into_boxed_slice(),
             seed,
-            ciphertext_ctx: ciphertext_ctx.clone(),
-            ksk_ctx: ksk_ctx.clone(),
         }
     }
 
-    pub fn switch(&self, poly: &Poly<T>) -> Vec<Poly<T>> {
-        debug_assert!(poly.context == self.ciphertext_ctx);
+    pub fn switch(&self, poly: &Poly, ksk_ctx: &PolyContext<'_, T>) -> Vec<Poly> {
+        // TODO: check that poly matches ksk_ctx
+        // And ksk_ctx matches the key
         debug_assert!(poly.representation == Representation::Coefficient);
 
-        let mut p = Poly::try_convert_from_u64(
+        let mut p = ksk_ctx.try_convert_from_u64(
             poly.coefficients.slice(s![0, ..]).as_slice().unwrap(),
-            &self.ksk_ctx,
-            &Representation::Coefficient,
+            Representation::Coefficient,
         );
-        p.change_representation(Representation::Evaluation);
-        let mut c1_out = &self.c1s[0] * &p;
-        p *= &self.c0s[0];
+        ksk_ctx.change_representation(&mut p, Representation::Evaluation);
+        let c1_out = ksk_ctx.mul(&self.c1s[0], &p);
+        ksk_ctx.mul_assign(&mut p, &self.c1s[0]);
         let mut c0_out = p;
 
         izip!(
@@ -77,79 +73,85 @@ where
         )
         .skip(1)
         .for_each(|(c0, c1, rests)| {
-            let mut p = Poly::try_convert_from_u64(
-                rests.as_slice().unwrap(),
-                &self.ksk_ctx,
-                &Representation::Coefficient,
-            );
+            let mut p = ksk_ctx
+                .try_convert_from_u64(rests.as_slice().unwrap(), Representation::Coefficient);
             p.change_representation(Representation::Evaluation);
 
-            c1_out += &(c1 * &p);
-            p *= c0;
-            c0_out += &p;
+            ksk_ctx.add_assign(&mut c1_out, &ksk_ctx.mul(c1, &p));
+            ksk_ctx.mul_assign(&mut p, &c0);
+            ksk_ctx.add_assign(&mut c0_out, &p);
         });
 
         vec![c0_out, c1_out]
     }
 
     pub fn generate_c1(
-        count: usize,
-        ksk_ctx: &Arc<PolyContext<T>>,
+        ksk_ctx: &PolyContext<'_, T>,
         seed: <ChaCha8Rng as SeedableRng>::Seed,
-    ) -> Vec<Poly<T>> {
+    ) -> Vec<Poly> {
         let mut rng = ChaCha8Rng::from_seed(seed);
-        (0..count)
+        (0..ksk_ctx.moduli_count)
             .into_iter()
-            .map(|_| Poly::random(ksk_ctx, &Representation::Evaluation, &mut rng))
+            .map(|_| ksk_ctx.random(Representation::Evaluation, &mut rng))
             .collect_vec()
     }
 
     pub fn generate_c0<R: CryptoRng + CryptoRngCore>(
-        ciphertext_ctx: &Arc<PolyContext<T>>,
         ksk_ctx: &Arc<PolyContext<T>>,
-        poly: &Poly<T>,
-        c1s: &[Poly<T>],
-        sk: &SecretKey<T>,
+        poly: &Poly,
+        c1s: &[Poly],
+        sk: &SecretKey,
         rng: &mut R,
-    ) -> Vec<Poly<T>> {
-        // encrypt g corresponding to every qi in ciphertext
-        // make sure that you have enough c1s
-        debug_assert!(ciphertext_ctx.moduli.len() == c1s.len());
+    ) -> Vec<Poly> {
         debug_assert!(poly.representation == Representation::Evaluation);
 
-        let mut sk = Poly::try_convert_from_i64_small(
-            &sk.coefficients,
-            ksk_ctx,
-            &Representation::Coefficient,
-        );
+        let mut sk =
+            ksk_ctx.try_convert_from_i64_small(&sk.coefficients, &Representation::Coefficient);
         sk.change_representation(Representation::Evaluation);
 
-        izip!(ciphertext_ctx.g.into_iter(), c1s.iter())
+        // gi = (q/qi) * [(q/qi)^-1]_qi
+        let big_q = ksk_ctx.big_q();
+        let g = ksk_ctx
+            .iter_moduli_ops()
+            .map(|modqi| {
+                let qi = modqi.modulus();
+                let qi_hat = big_q / qi;
+                qi_hat * mod_inverse_biguint(&qi_hat, qi)
+            })
+            .collect_vec();
+
+        izip!(g.into_iter(), c1s.iter())
             .map(|(g, c1)| {
-                let mut g = Poly::try_convert_from_biguint(
+                let mut g = ksk_ctx.try_convert_from_biguint(
                     vec![g.clone(); ksk_ctx.degree].as_slice(),
-                    ksk_ctx,
                     &Representation::Evaluation,
                 );
-                // m
-                g *= poly;
-                let mut e = Poly::random_gaussian(ksk_ctx, &Representation::Coefficient, 10, rng);
-                e.change_representation(Representation::Evaluation);
-                e += &g;
-                e -= &(c1 * &sk);
+                // m = gi*poly
+                ksk_ctx.mul_assign(&mut g, &poly);
+
+                let mut e = ksk_ctx.random_gaussian(Representation::Coefficient, 10, rng);
+                ksk_ctx.change_representation(&mut e, Representation::Evaluation);
+                // m + e
+                ksk_ctx.add_assign(&mut e, &g);
+
+                // -a*sk
+                let c1_sk = ksk_ctx.mul(&c1, &sk);
+
+                // m + e - a*sk
+                ksk_ctx.sub_assign(&mut e, &c1_sk);
+
                 e
             })
             .collect_vec()
     }
 }
 
-pub struct HybridKeySwitchingKey<T: Ntt> {
+pub struct HybridKeySwitchingKey {
     // ksk_ctx is q_ctx
-    params: Arc<BfvParameters<T>>,
-    ksk_ctx: Arc<PolyContext<T>>,
-    qp_ctx: Arc<PolyContext<T>>,
     seed: <ChaCha8Rng as SeedableRng>::Seed,
     dnum: usize,
+    alpha: usize,
+    aux_bits: usize,
 
     // approx_switch_crt_basis //
     // I would want all these to be Array instead of simple vecs. But it's kind of tricky.
@@ -158,20 +160,20 @@ pub struct HybridKeySwitchingKey<T: Ntt> {
     // the vector that we convert to Array will of desired shape. We can fix this using
     // dummy calues, but this increases the complexity and becomes harder to manage.
     qj_hat_inv_modqj_parts: Vec<Vec<u64>>,
-    qj_moduli_parts: Vec<Vec<Modulus>>,
+    qj_moduli_ops_parts: Vec<Vec<Modulus>>,
     qj_hat_modqpj_parts: Vec<Array2<u64>>,
-    qpj_moduli_parts: Vec<Vec<Modulus>>,
+    qpj_moduli_ops_parts: Vec<Vec<Modulus>>,
 
     // approx_mod_down //
-    p_hat_inv_modp: Array1<u64>,
+    p_hat_inv_modp: Vec<u64>,
     p_hat_modq: Array2<u64>,
-    p_inv_modq: Array1<u64>,
+    p_inv_modq: Vec<u64>,
 
-    c0s: Box<[Poly<T>]>,
-    c1s: Box<[Poly<T>]>,
+    c0s: Box<[Poly]>,
+    c1s: Box<[Poly]>,
 }
 
-impl<T> HybridKeySwitchingKey<T>
+impl<T> HybridKeySwitchingKey
 where
     T: Ntt,
 {
@@ -181,25 +183,25 @@ where
     /// Let's say ciphertext ctx = Q' and ksk ctx = Q. The extended ctx should be QP. To speed things
     /// up during `key_switch` operation, we assume Q == Q' because we extend poly from Qj to Q[..i*alpha] + Q[(i+1)*alpha..] + P.
     pub fn new<R: CryptoRng + CryptoRngCore>(
-        poly: &Poly<T>,
-        sk: &SecretKey<T>,
-        ciphertext_ctx: &Arc<PolyContext<T>>,
+        poly: &Poly,
+        sk: &SecretKey,
+        ksk_ctx: &PolyContext<'_, T>,
+        specialp_ctx: &PolyContext<'_, T>,
+        qp_ctx: &PolyContext<'_, T>,
+        alpha: usize,
+        aux_bits: usize,
         rng: &mut R,
-    ) -> HybridKeySwitchingKey<T> {
-        let params = sk.params.clone();
-        let ksk_ctx = poly.context.clone();
-
-        let alpha = params.alpha;
-        let aux_bits = params.aux_bits;
+    ) -> HybridKeySwitchingKey {
         let mut qj = vec![];
-        ciphertext_ctx
-            .moduli
+        ksk_ctx
+            .iter_moduli_ops()
             .chunks(alpha)
-            .for_each(|q_parts_moduli| {
+            .into_iter()
+            .for_each(|modqi_parts| {
                 // Qj
                 let mut qji = BigUint::one();
-                q_parts_moduli.iter().for_each(|qi| {
-                    qji *= *qi;
+                modqi_parts.into_iter().for_each(|modqi| {
+                    qji *= modqi.modulus();
                 });
                 qj.push(qji);
             });
@@ -208,200 +210,118 @@ where
         // having alpha*auxbits - maxbits greater than a few bits costs performance, since you end
         // up having an additional special prime for nothing. In our case, alpha and aux_bites are fixed
         // to 3 and 60. Hence, assuming that you have alpha consecutive ciphertext primes of size 40-60
-        // (usually the case for lower levels) it must be the case that maxbits is around 90.
+        // (usually the case for lower levels) it must be the case that maxbits is around 120.
         let mut maxbits = qj[0].bits();
         qj.iter().skip(1).for_each(|q| {
             maxbits = std::cmp::max(maxbits, q.bits());
         });
-        let ideal_special_prime_count = (maxbits as f64 / aux_bits as f64).ceil() as usize;
-        debug_assert!(ideal_special_prime_count == params.alpha);
+        let ideal_special_primes_count = (maxbits as f64 / aux_bits as f64).ceil() as usize;
+        assert!(ideal_special_primes_count == alpha);
 
         // P is special prime
-        let (p, p_dig) = {
-            let mut p = BigUint::one();
-            let mut p_dig = BigUintDig::one();
-            params.special_moduli.iter().for_each(|pj| {
-                p *= *pj;
-                p_dig *= *pj;
-            });
-            (p, p_dig)
-        };
+        let p = specialp_ctx.big_q();
 
         // Calculating g values + Pre-comp for switching Qj to QP.
-        let q = ciphertext_ctx.modulus();
-        let q_dig = ciphertext_ctx.modulus_dig();
-        let q_moduli = ciphertext_ctx.moduli.clone();
-        // g = P * Qj_hat * Qj_hat_inv_modQj
+        let q = ksk_ctx.big_q();
+        // g = P * Q/Qj * [(Q/Qj)^-1]_Qj
         let mut g = vec![];
-        // FIXME: we use 2d Vec instead of Array2 because the last part may contain less than alpha qis.
-        // But this isn't acceptable. Change this to Array2 and adjust for last part somehow.
+        // we are forced to use Vec insted of `ndarray` because each of the
+        // 2d vectors cannot be translated to a proper array in row major form.
         let mut qj_hat_inv_modqj_parts = vec![];
         let mut qj_hat_modqpj_parts = vec![];
-        let mut qpj_moduli_parts = vec![];
-        let mut qj_moduli_parts = vec![];
+        let mut qpj_moduli_ops_parts = vec![];
+        let mut qj_moduli_ops_parts = vec![];
 
-        // let mut q_moduli_ops = vec![];
-        // q_moduli.iter().for_each(|qi| {
-        //     q_moduli_ops.push(Arc::new(Modulus::new(*qi)));
-        // });
-        // let mut p_moduli_ops = vec![];
-        // params.special_moduli.iter().for_each(|pi| {
-        //     p_moduli_ops.push(Arc::new(Modulus::new(*pi)));
-        // });
+        let parts = (ksk_ctx.moduli_count as f64 / alpha as f64).ceil() as usize;
 
-        let parts = (q_moduli.len() as f64 / alpha as f64).ceil() as usize;
-
-        q_moduli
+        ksk_ctx
+            .iter_moduli_ops()
             .chunks(alpha)
+            .into_iter()
             .enumerate()
-            .for_each(|(chunk_index, qj_moduli)| {
+            .for_each(|(chunk_index, modqj)| {
                 // Qj
                 let mut qj = BigUint::one();
-                let mut qj_dig = BigUintDig::one();
-
-                qj_moduli.iter().for_each(|qi| {
-                    qj *= *qi;
-                    qj_dig *= *qi;
-                });
+                modqj.into_iter().for_each(|modqi| qj *= modqi.modulus());
 
                 // Q/Qj
                 let qj_hat = &q / &qj;
 
                 // [(Q/Qj)^-1]_Qj
-                let qj_hat_inv_modqj = BigUint::from_bytes_le(
-                    &(&q_dig / &qj_dig)
-                        .mod_inverse(&qj_dig)
-                        .unwrap()
-                        .to_biguint()
-                        .unwrap()
-                        .to_bytes_le(),
-                );
+                let qj_hat_inv_modqj = mod_inverse_biguint(&qj_hat, &qj);
                 g.push(&p * qj_hat * qj_hat_inv_modqj);
 
                 // precomp approx_switch_crt_basis
                 let mut qj_hat_inv_modqj = vec![];
-                qj_moduli.iter().for_each(|qji| {
-                    let qji_hat_inv_modqji = (&qj_dig / *qji)
-                        .mod_inverse(BigUintDig::from_u64(*qji).unwrap())
-                        .unwrap()
-                        .to_biguint()
-                        .unwrap()
-                        .to_u64()
-                        .unwrap();
-                    qj_hat_inv_modqj.push(qji_hat_inv_modqji);
+                modqj.into_iter().for_each(|modqji| {
+                    let qji = modqji.modulus();
+                    qj_hat_inv_modqj.push(mod_inverse_biguint(&(qj / qji), qji).to_u64().unwrap());
                 });
                 qj_hat_inv_modqj_parts.push(qj_hat_inv_modqj);
-                // let p_start = q_moduli[..alpha * chunk_index].to_vec();
-                // let p_mid = {
-                //     if (alpha * (chunk_index + 1)) < q_moduli.len() {
-                //         q_moduli[(alpha * (chunk_index + 1))..].to_vec()
-                //     } else {
-                //         vec![]
-                //     }
-                // };
-                qj_moduli_parts.push(
-                    q_moduli[alpha * chunk_index
-                        ..std::cmp::min(q_moduli.len(), alpha * (chunk_index + 1))]
-                        .iter()
-                        .map(|qi| Modulus::new(*qi))
-                        .collect_vec(),
+
+                let qj_moduli_ops = modqj.into_iter().map(|modqji| modqji.clone()).collect_vec();
+
+                let mut qpj_moduli_ops = vec![];
+                qpj_moduli_ops.extend_from_slice(&ksk_ctx.moduli_ops()[..alpha * chunk_index]);
+                qpj_moduli_ops.extend_from_slice(
+                    &ksk_ctx.moduli_ops()
+                        [std::cmp::min(ksk_ctx.moduli_count, alpha * (chunk_index + 1))..],
                 );
-
-                let qpj_moduli = [
-                    q_moduli[..alpha * chunk_index].to_vec(), // qis before chunk's qjs
-                    q_moduli[std::cmp::min(q_moduli.len(), alpha * (chunk_index + 1))..].to_vec(), // qis after chunk's qjs
-                    params.special_moduli.clone(),
-                ]
-                .concat();
-
-                // let p_whole = [p_start, p_mid, p_moduli.clone()].concat();
+                qpj_moduli_ops.extend_from_slice(specialp_ctx.moduli_ops());
 
                 let mut qj_hat_modqpj = vec![];
-                qj_moduli.iter().for_each(|qji| {
-                    qpj_moduli.iter().for_each(|modpj| {
-                        qj_hat_modqpj.push(((&qj / qji) % modpj).to_u64().unwrap());
-                    });
+                qpj_moduli_ops.iter().for_each(|modqpji| {
+                    qj_moduli_ops.iter().for_each(|modqji| {
+                        qj_hat_modqpj.push((qj / modqji.modulus()).to_u64().unwrap())
+                    })
                 });
                 let qj_hat_modqpj = Array2::<u64>::from_shape_vec(
-                    (qj_moduli.len(), qpj_moduli.len()),
+                    (qpj_moduli_ops.len(), qj_moduli_ops.len()),
                     qj_hat_modqpj,
                 )
                 .unwrap();
-                qj_hat_modqpj_parts.push(qj_hat_modqpj);
 
-                qpj_moduli_parts.push(
-                    qpj_moduli
-                        .iter()
-                        .map(|modqpj| Modulus::new(*modqpj))
-                        .collect_vec(),
-                );
+                qj_hat_modqpj_parts.push(qj_hat_modqpj);
+                qpj_moduli_ops_parts.push(qpj_moduli_ops);
+                qj_moduli_ops_parts.push(qj_moduli_ops);
             });
 
         // Precompute for P to Q (used for approx_switch_crt_basis in approx_mod_down)
         let mut p_hat_inv_modp = vec![];
         let mut p_hat_modq = vec![];
-        params.special_moduli.iter().for_each(|(pi)| {
-            p_hat_inv_modp.push(
-                (&p_dig / pi)
-                    .mod_inverse(BigUintDig::from_u64(*pi).unwrap())
-                    .unwrap()
-                    .to_biguint()
-                    .unwrap()
-                    .to_u64()
-                    .unwrap(),
-            );
-
-            // pj_hat_modq
-            let p_hat = &p / pi;
-            q_moduli
-                .iter()
-                .for_each(|qi| p_hat_modq.push((&p_hat % qi).to_u64().unwrap()));
+        specialp_ctx.iter_moduli_ops().for_each(|(modpi)| {
+            let pi = modpi.modulus();
+            let pi_hat = &p / pi;
+            p_hat_inv_modp.push(mod_inverse_biguint(&pi_hat, pi).to_u64().unwrap());
         });
-        let p_hat_inv_modp = Array1::from_shape_vec(alpha, p_hat_inv_modp).unwrap();
-        let p_hat_modq = Array2::from_shape_vec((alpha, q_moduli.len()), p_hat_modq).unwrap();
+        ksk_ctx.iter_moduli_ops().for_each(|modqj| {
+            specialp_ctx.iter_moduli_ops().for_each(|(modpi)| {
+                p_hat_modq.push((&p / modpi.modulus()).to_u64().unwrap());
+            });
+        });
+        let p_hat_modq = Array2::from_shape_vec((ksk_ctx.moduli_count, alpha), p_hat_modq).unwrap();
         let mut p_inv_modq = vec![];
         // Precompute for dividing values in basis Q by P (approx_mod_down)
-        q_moduli.iter().for_each(|qi| {
-            p_inv_modq.push(
-                p_dig
-                    .clone()
-                    .mod_inverse(BigUintDig::from_u64(*qi).unwrap())
-                    .unwrap()
-                    .to_biguint()
-                    .unwrap()
-                    .to_u64()
-                    .unwrap(),
-            );
+        ksk_ctx.iter_moduli_ops().for_each(|modqi| {
+            p_inv_modq.push(mod_inverse_biguint(&p, modqi.modulus()).to_u64().unwrap());
         });
-        let p_inv_modq = Array1::from_shape_vec(q_moduli.len(), p_inv_modq).unwrap();
-
-        // ksk_ctx.moduli_ops.chunks(alpha).for_each(|q_mod_ops| {
-        //     qj_moduli_parts.push(q_mod_ops.to_vec());
-        // });
-
-        // qp = q + p moduli
-        let qp_ctx = Arc::new(PolyContext::new(
-            &[q_moduli.to_vec(), params.special_moduli.clone()].concat(),
-            ksk_ctx.degree,
-        ));
 
         let mut seed = <ChaCha8Rng as SeedableRng>::Seed::default();
         rng.fill_bytes(&mut seed);
         let c1s = Self::generate_c1(parts, &qp_ctx, seed);
-        let c0s = Self::generate_c0(&c1s, &g, &poly, &sk, rng);
+        let c0s = Self::generate_c0(&qp_ctx, &c1s, &g, &poly, &sk, rng);
 
         HybridKeySwitchingKey {
-            params: params,
-            ksk_ctx: ksk_ctx.clone(),
-            qp_ctx,
             seed,
             dnum: parts,
+            alpha,
+            aux_bits,
 
             // approx_switch_crt_basis //
             qj_hat_inv_modqj_parts,
-            qj_moduli_parts,
+            qj_moduli_ops_parts,
             qj_hat_modqpj_parts,
-            qpj_moduli_parts,
+            qpj_moduli_ops_parts,
 
             // approx_mod_down //
             p_hat_inv_modp,
@@ -413,17 +333,25 @@ where
         }
     }
 
-    pub fn switch(&self, poly: &Poly<T>) -> (Poly<T>, Poly<T>) {
+    pub fn switch(
+        &self,
+        poly: &Poly,
+        qp_ctx: &PolyContext<'_, T>,
+        ksk_ctx: &PolyContext<'_, T>,
+        specialp_ctx: &PolyContext<'_, T>,
+    ) -> (Poly, Poly) {
+        // TODO: check poly context
         debug_assert!(poly.representation == Representation::Coefficient);
-        debug_assert!(poly.context == self.ksk_ctx);
 
-        let alpha = self.params.alpha;
+        let alpha = self.alpha;
         let dnum = self.dnum;
 
-        // divide poly into parts and switch them from Qj to QP
+        // divide poly into parts and switch them from Qj to QP and key switch
         let mut poly_parts_qp = vec![];
+        let mut c0_out = Poly::placeholder();
+        let mut c1_out = Poly::placeholder();
         for i in 0..self.dnum {
-            let mut qp_poly = Poly::zero(&self.qp_ctx, &Representation::Coefficient);
+            let mut qp_poly = qp_ctx.zero(Representation::Coefficient);
 
             let qj_coefficients = {
                 if (i + 1) == self.dnum {
@@ -435,18 +363,17 @@ where
             };
             let mut parts_count = qj_coefficients.shape()[0];
 
-            let mut p_whole_coefficients = Poly::<T>::approx_switch_crt_basis(
+            let mut p_whole_coefficients = PolyContext::approx_switch_crt_basis(
                 &qj_coefficients,
                 &self.qj_moduli_parts[i],
-                poly.context.degree,
+                qp_ctx.degree,
                 &self.qj_hat_inv_modqj_parts[i],
                 &self.qj_hat_modqpj_parts[i],
                 &self.qpj_moduli_parts[i],
             );
 
-            // TODO: can you parallelize following 3 operations ?
             // ..p_start
-            azip!(
+            izip!(
                 qp_poly
                     .coefficients
                     .slice_mut(s![..(i * alpha), ..])
@@ -457,14 +384,14 @@ where
                     .outer_iter()
                     .into_producer()
             )
-            .for_each(|mut qpi, pi| {
+            .for_each(|(mut qpi, pi)| {
                 qpi.as_slice_mut()
                     .unwrap()
                     .copy_from_slice(pi.as_slice().unwrap());
             });
 
             // p_start..p_start+qj
-            azip!(
+            izip!(
                 qp_poly
                     .coefficients
                     .slice_mut(s![(i * alpha)..(i * alpha + parts_count), ..])
@@ -472,14 +399,14 @@ where
                     .into_producer(),
                 qj_coefficients.outer_iter().into_producer()
             )
-            .for_each(|mut qpi, qj| {
+            .for_each(|(mut qpi, qj)| {
                 qpi.as_slice_mut()
                     .unwrap()
                     .copy_from_slice(qj.as_slice().unwrap());
             });
 
             // p_start+qj..
-            azip!(
+            izip!(
                 qp_poly
                     .coefficients
                     .slice_mut(s![(i * alpha + parts_count).., ..])
@@ -490,126 +417,121 @@ where
                     .outer_iter()
                     .into_producer()
             )
-            .for_each(|mut qpi, pi| {
+            .for_each(|(mut qpi, pi)| {
                 qpi.as_slice_mut()
                     .unwrap()
                     .copy_from_slice(pi.as_slice().unwrap());
             });
 
-            qp_poly.change_representation(Representation::Evaluation);
-            poly_parts_qp.push(qp_poly);
+            qp_ctx.change_representation(&mut qp_poly, Representation::Evaluation);
+
+            if c1_out.representation == Representation::Unknown {
+                c1_out = qp_ctx.mul(&qp_poly, &self.c1s[i]);
+                qp_ctx.mul_assign(&mut qp_poly, &self.c0s[i]);
+                c0_out = qp_poly;
+            } else {
+                qp_ctx.add_assign(&mut c1_out, &qp_ctx.mul(&qp_poly, &self.c1s[i]));
+                qp_ctx.mul_assign(&mut qp_poly, &self.c0s[i]);
+                qp_ctx.add_assign(&mut c0_out, &qp_poly);
+            }
         }
 
-        // perform key switching
-        let mut c0_out = &poly_parts_qp[0] * &self.c0s[0];
-        poly_parts_qp[0] *= &self.c1s[0];
-        // FIXME: I find this clone unnecessary
-        let mut c1_out = poly_parts_qp[0].clone();
-
-        izip!(poly_parts_qp.iter_mut(), self.c0s.iter(), self.c1s.iter())
-            .skip(1)
-            .for_each(|(p, c0i, c1i)| {
-                c0_out += &(c0i * p);
-                *p *= &c1i;
-                c1_out += &p
-            });
-
         // switch results from QP to Q
-        c0_out.approx_mod_down(
-            &self.ksk_ctx,
-            &self.params.special_moduli_ctx,
-            &self.p_hat_inv_modp.as_slice().unwrap(),
+        qp_ctx.approx_mod_down(
+            &mut c0_out,
+            &ksk_ctx,
+            &specialp_ctx,
+            &self.p_hat_inv_modp,
             &self.p_hat_modq,
-            &self.p_inv_modq.as_slice().unwrap(),
+            &self.p_inv_modq,
         );
 
-        c1_out.approx_mod_down(
-            &self.ksk_ctx,
-            &self.params.special_moduli_ctx,
-            &self.p_hat_inv_modp.as_slice().unwrap(),
+        qp_ctx.approx_mod_down(
+            &mut c0_out,
+            &ksk_ctx,
+            &specialp_ctx,
+            &self.p_hat_inv_modp,
             &self.p_hat_modq,
-            &self.p_inv_modq.as_slice().unwrap(),
+            &self.p_inv_modq,
         );
 
         (c0_out, c1_out)
     }
 
-    pub fn generate_c1(
+    fn generate_c1(
         count: usize,
-        qp_ctx: &Arc<PolyContext<T>>,
+        qp_ctx: &PolyContext<'_, T>,
         seed: <ChaCha8Rng as SeedableRng>::Seed,
-    ) -> Vec<Poly<T>> {
+    ) -> Vec<Poly> {
         let mut rng = ChaCha8Rng::from_seed(seed);
         (0..count)
             .into_iter()
-            .map(|_| Poly::random(qp_ctx, &Representation::Evaluation, &mut rng))
+            .map(|_| qp_ctx.random(Representation::Evaluation, &mut rng))
             .collect_vec()
     }
 
-    pub fn generate_c0<R: CryptoRng + CryptoRngCore>(
-        c1s: &[Poly<T>],
+    fn generate_c0<R: CryptoRng + CryptoRngCore>(
+        qp_ctx: &PolyContext<'_, T>,
+        c1s: &[Poly],
         g: &[BigUint],
-        // ksk_ctx: &Arc<PolyContext>,
-        poly: &Poly<T>,
-        sk: &SecretKey<T>,
+        poly: &Poly,
+        sk: &SecretKey,
         rng: &mut R,
-    ) -> Vec<Poly<T>> {
+    ) -> Vec<Poly> {
+        //TODO: check poly is of correct context
         debug_assert!(poly.representation == Representation::Evaluation);
-        debug_assert!(g.len() == c1s.len());
 
-        let qp_ctx = c1s[0].context.clone();
-        // make sure special P exists in QP
-        debug_assert!(poly.context.moduli.len() < qp_ctx.moduli.len());
+        // We run into problem here that makes using API for `PolynomialContext` as usual not desirable. We need to calculate
+        // [c0]_QP = [g]_QP * [poly]_QP + [e]_QP - [c1]_QP * [sk]_QP.
+        // To calcualte this we have everything in QP basis except `poly`, which we need to extend from Q to QP.
+        // But extending poly from Q to QP will be wasteful because it is then multiplied with g and [g]_P is 0 (since P|g).
+        // Moreover, this will require having additional pre-computes for switching Q to P. Hence, we prefer the method implemented
+        // below. It basically does the same thing but processes Q and P modulus separately.
         let c0s = izip!(c1s.iter(), g)
             .map(|(c1, g_part)| {
-                let mut c0 = Poly::zero(&qp_ctx, &Representation::Evaluation);
-                let mut e = Poly::random_gaussian(&qp_ctx, &Representation::Coefficient, 10, rng);
-                e.change_representation(Representation::Evaluation);
+                let mut c0 = qp_ctx.zero(Representation::Evaluation);
+                let mut e = qp_ctx.random_gaussian(Representation::Coefficient, 10, rng);
+                qp_ctx.change_representation(&mut e, Representation::Evaluation);
 
-                // An alternate to this will be to extend poly from Q to QP and calculate c0 = g * poly + e - (c1*sk). However there are two drawbacks to this:
-                // 1. This will require pre-computation for switching Q to P and then extending Q to QP
-                // 2. Notice that calculating P part will be useless since it will be multiplied by `g` afterwards. `g` is of form `P * (Q/Qj)^-1_Qj * (Q/Qj)` and will vanish
-                // over `pi`.
-
-                // Q parts
+                // Q
                 // g = P * Qj_hat * Qj_hat_inv_modQj
                 // [c0]_qi = [g * poly]_qi + [e]_qi - [c1s * sk]_qi
                 izip!(
-                    poly.context.moduli_ops.iter(),
-                    poly.context.ntt_ops.iter(),
+                    qp_ctx.moduli_ops.0.iter(),
+                    qp_ctx.ntt_ops.0.iter(),
                     poly.coefficients.outer_iter(),
                     c0.coefficients.outer_iter_mut(),
                     c1.coefficients.outer_iter(),
                     e.coefficients.outer_iter(),
                 )
-                .for_each(|(modq, nttq, vqi, mut c0qi, c1qi, eqi)| {
-                    let mut skqi = modq.reduce_vec_i64_small(&sk.coefficients);
-                    nttq.forward(&mut skqi);
+                .for_each(|(modqi, nttqi, xi, mut c0qi, c1qi, eqi)| {
+                    let mut skqi = modqi.reduce_vec_i64_small(&sk.coefficients);
+                    nttqi.forward(&mut skqi);
 
                     // [g * poly]_qi
                     c0qi.as_slice_mut()
                         .unwrap()
-                        .copy_from_slice(vqi.as_slice().unwrap());
-                    let g_u64 = (g_part % modq.modulus()).to_u64().unwrap();
-                    modq.scalar_mul_mod_fast_vec(c0qi.as_slice_mut().unwrap(), g_u64);
+                        .copy_from_slice(xi.as_slice().unwrap());
+                    let g_u64 = (g_part % modqi.modulus()).to_u64().unwrap();
+                    modqi.scalar_mul_mod_fast_vec(c0qi.as_slice_mut().unwrap(), g_u64);
 
                     // [g * poly]_qi + [e]_qi
-                    modq.add_mod_fast_vec(c0qi.as_slice_mut().unwrap(), eqi.as_slice().unwrap());
+                    modqi.add_mod_fast_vec(c0qi.as_slice_mut().unwrap(), eqi.as_slice().unwrap());
 
                     // [c1s * sk]_qi
-                    modq.mul_mod_fast_vec(&mut skqi, c1qi.as_slice().unwrap());
+                    modqi.mul_mod_fast_vec(&mut skqi, c1qi.as_slice().unwrap());
 
                     // [g * poly]_qi + [e]_qi - [c1s * sk]_qi
-                    modq.sub_mod_fast_vec(c0qi.as_slice_mut().unwrap(), &skqi);
+                    modqi.sub_mod_fast_vec(c0qi.as_slice_mut().unwrap(), &skqi);
                 });
 
-                // P parts
+                // P
                 // [c0]_pi = [e]_pi - [c1s * sk]_pi
-                // Note: `g` vanishes over pi
-                let to_skip = poly.context.moduli.len();
+                // (`g` vanishes over pi)
+                let to_skip = qp_ctx.moduli_ops.0.len();
                 izip!(
-                    qp_ctx.moduli_ops.iter().skip(to_skip),
-                    qp_ctx.ntt_ops.iter().skip(to_skip),
+                    qp_ctx.moduli_ops.1.iter(),
+                    qp_ctx.ntt_ops.1.iter(),
                     c0.coefficients.outer_iter_mut().skip(to_skip),
                     c1.coefficients.outer_iter().skip(to_skip),
                     e.coefficients.outer_iter().skip(to_skip),
@@ -622,7 +544,6 @@ where
                     let mut skpi = modpi.reduce_vec_i64_small(&sk.coefficients);
                     nttpi.forward(&mut skpi);
                     modpi.mul_mod_fast_vec(&mut skpi, c1pi.as_slice().unwrap());
-
                     modpi.sub_mod_fast_vec(c0pi.as_slice_mut().unwrap(), &skpi);
                 });
 
@@ -636,46 +557,42 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parameters::BfvParameters;
+    use crate::parameters::{BfvParameters, PolyType};
     use num_bigint::BigUint;
     use rand::thread_rng;
 
     #[test]
     fn key_switching_works() {
-        let bfv_params = Arc::new(BfvParameters::default(15, 1 << 15));
-        let ct_ctx = bfv_params.ciphertext_poly_contexts[0].clone();
-        let ksk_ctx = ct_ctx.clone();
+        let params = BfvParameters::default(15, 1 << 15);
+        let ksk_ctx = params.poly_ctx(&PolyType::Q, 0);
 
         let mut rng = thread_rng();
 
-        let sk = SecretKey::random(&bfv_params, &mut rng);
+        let sk = SecretKey::random(&params, &mut rng);
 
-        let poly = Poly::random(&ksk_ctx, &Representation::Evaluation, &mut rng);
-        let ksk = BVKeySwitchingKey::new(&poly, &sk, &ct_ctx, &mut rng);
+        let poly = ksk_ctx.random(Representation::Evaluation, &mut rng);
+        let ksk = BVKeySwitchingKey::new(&poly, &sk, &ksk_ctx, &mut rng);
 
-        let mut other_poly = Poly::random(&ct_ctx, &Representation::Coefficient, &mut rng);
+        let mut other_poly = ksk_ctx.random(Representation::Coefficient, &mut rng);
 
         let now = std::time::Instant::now();
-        let cs = ksk.switch(&other_poly);
+        let cs = ksk.switch(&other_poly, &ksk_ctx);
         println!("Time elapsed: {:?}", now.elapsed());
 
-        let mut sk_poly = Poly::try_convert_from_i64_small(
-            &sk.coefficients,
-            &ksk_ctx,
-            &Representation::Coefficient,
-        );
-        sk_poly.change_representation(Representation::Evaluation);
-        let mut res = &cs[0] + &(&cs[1] * &sk_poly);
+        let mut sk_poly =
+            ksk_ctx.try_convert_from_i64_small(&sk.coefficients, &Representation::Coefficient);
+        ksk_ctx.change_representation(&mut sk_poly, Representation::Evaluation);
+        let mut res = ksk_ctx.add(&cs[0], &ksk_ctx.mul(&cs[1], &sk_poly));
 
         // expected
-        other_poly.change_representation(Representation::Evaluation);
-        other_poly *= &poly;
+        ksk_ctx.change_representation(&mut other_poly, Representation::Evaluation);
+        let expected_poly = ksk_ctx.mul(&other_poly, &poly);
 
-        res -= &other_poly;
-        res.change_representation(Representation::Coefficient);
+        let mut diff = ksk_ctx.sub(&res, &expected_poly);
+        ksk_ctx.change_representation(&mut diff, Representation::Coefficient);
 
-        izip!(Vec::<BigUint>::from(&res).iter(),).for_each(|v| {
-            let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.modulus() - v).bits());
+        izip!(ksk_ctx.try_convert_to_biguint(&diff)).for_each(|v| {
+            let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.big_q() - v).bits());
             // dbg!(&diff_bits);
             assert!(diff_bits <= 70);
         });
@@ -683,84 +600,47 @@ mod tests {
 
     #[test]
     fn hybrid_key_switching() {
-        let bfv_params = Arc::new(BfvParameters::default(5, 1 << 3));
-        let ct_ctx = bfv_params.ciphertext_poly_contexts[0].clone();
-        let ksk_ctx = ct_ctx.clone();
+        let params = BfvParameters::default(5, 1 << 3);
+        let ksk_ctx = params.poly_ctx(&PolyType::Q, 0);
+        let specialp_ctx = params.poly_ctx(&PolyType::SpecialP, 0);
+        let qp_ctx = params.poly_ctx(&PolyType::QP, 0);
 
         let mut rng = thread_rng();
 
-        let sk = SecretKey::random(&bfv_params, &mut rng);
+        let sk = SecretKey::random(&params, &mut rng);
 
-        let poly = Poly::random(&ksk_ctx, &Representation::Evaluation, &mut rng);
-        let ksk = HybridKeySwitchingKey::new(&poly, &sk, &ct_ctx, &mut rng);
+        let poly = ksk_ctx.random(Representation::Evaluation, &mut rng);
+        let ksk = HybridKeySwitchingKey::new(
+            &poly,
+            &sk,
+            &ksk_ctx,
+            &specialp_ctx,
+            &qp_ctx,
+            params.alpha,
+            params.aux_bits,
+            &mut rng,
+        );
 
-        let mut other_poly = Poly::random(&ct_ctx, &Representation::Coefficient, &mut rng);
+        let mut other_poly = ksk_ctx.random(Representation::Evaluation, &mut rng);
         let now = std::time::Instant::now();
-        let (cs0, cs1) = ksk.switch(&other_poly);
+        let cs = ksk.switch(&other_poly, &qp_ctx, &ksk_ctx, &specialp_ctx);
         println!("Time elapsed: {:?}", now.elapsed());
 
-        let mut sk_poly = Poly::try_convert_from_i64_small(
-            &sk.coefficients,
-            &ksk_ctx,
-            &Representation::Coefficient,
-        );
-        sk_poly.change_representation(Representation::Evaluation);
-        let mut res = &cs0 + &(&cs1 * &sk_poly);
+        let mut sk_poly =
+            ksk_ctx.try_convert_from_i64_small(&sk.coefficients, &Representation::Coefficient);
+        ksk_ctx.change_representation(&mut sk_poly, Representation::Evaluation);
+        let mut res = ksk_ctx.add(&cs[0], &ksk_ctx.mul(&cs[1], &sk_poly));
 
         // expected
-        other_poly.change_representation(Representation::Evaluation);
-        other_poly *= &poly;
+        ksk_ctx.change_representation(&mut other_poly, Representation::Evaluation);
+        let expected_poly = ksk_ctx.mul(&other_poly, &poly);
 
-        res -= &other_poly;
-        res.change_representation(Representation::Coefficient);
-        izip!(Vec::<BigUint>::from(&res).iter(),).for_each(|v| {
-            let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.modulus() - v).bits());
-            dbg!(diff_bits);
+        let mut diff = ksk_ctx.sub(&res, &expected_poly);
+        ksk_ctx.change_representation(&mut diff, Representation::Coefficient);
+
+        izip!(ksk_ctx.try_convert_to_biguint(&diff)).for_each(|v| {
+            let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.big_q() - v).bits());
+            dbg!(&diff_bits);
         });
-    }
-
-    #[test]
-    fn comp() {
-        let bfv_params = Arc::new(BfvParameters::default(14, 1 << 15));
-        let ctx = bfv_params.ciphertext_poly_contexts[0].clone();
-
-        let mut rng = thread_rng();
-        let mut p = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
-        let q = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
-        let modop = Modulus::new(32);
-
-        let now = std::time::Instant::now();
-        azip!(
-            p.coefficients.axis_iter_mut(Axis(1)),
-            q.coefficients.axis_iter(Axis(1))
-        )
-        .for_each(|mut a, b| {
-            a[0] += modop.mul_mod_fast(a[0], b[0]);
-            a[1] += modop.mul_mod_fast(a[1], b[1]);
-            a[2] += modop.mul_mod_fast(a[2], b[2]);
-            a[3] += modop.mul_mod_fast(a[5], b[5]);
-            a[4] += modop.mul_mod_fast(a[3], b[3]);
-            a[5] += modop.mul_mod_fast(a[4], b[4]);
-        });
-        println!("azip! took: {:?}", now.elapsed());
-
-        let mut p = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
-        let q = Poly::random(&ctx, &Representation::Coefficient, &mut rng);
-        let modop = Modulus::new(32);
-
-        let now = std::time::Instant::now();
-        izip!(
-            p.coefficients.axis_iter_mut(Axis(1)),
-            q.coefficients.axis_iter(Axis(1))
-        )
-        .for_each(|(mut a, b)| {
-            a[0] += modop.mul_mod_fast(a[0], b[0]);
-            a[1] += modop.mul_mod_fast(a[1], b[1]);
-            a[2] += modop.mul_mod_fast(a[2], b[2]);
-            a[3] += modop.mul_mod_fast(a[5], b[5]);
-            a[4] += modop.mul_mod_fast(a[3], b[3]);
-            a[5] += modop.mul_mod_fast(a[4], b[4]);
-        });
-        println!("izip! took: {:?}", now.elapsed());
     }
 }

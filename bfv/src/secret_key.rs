@@ -9,12 +9,11 @@ use rand::{CryptoRng, RngCore};
 use std::sync::Arc;
 use traits::Ntt;
 
-pub struct SecretKey<T: Ntt> {
+pub struct SecretKey {
     pub(crate) coefficients: Box<[i64]>,
-    pub(crate) params: Arc<BfvParameters<T>>,
 }
 
-impl<T> SecretKey<T>
+impl<T> SecretKey
 where
     T: Ntt,
 {
