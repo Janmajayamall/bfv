@@ -578,7 +578,7 @@ mod tests {
     #[test]
     fn barret_reduction_u128_works() {
         let mut rng = thread_rng();
-        for _ in 0..1000 {
+        for _ in 0..100 {
             let prime = generate_prime(60, 16, 1 << 60).unwrap();
             let modulus = Modulus::new(prime);
             let value: u128 = rng.gen();

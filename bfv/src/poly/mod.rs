@@ -55,6 +55,7 @@ impl Substitution {
             exponent,
             power_bitrev,
             degree,
+            bit_rev: todo!(),
         }
     }
 }
@@ -70,7 +71,7 @@ pub struct Poly {
 impl Poly {
     pub fn placeholder() -> Poly {
         Poly {
-            coefficients: vec![],
+            coefficients: Array2::zeros((0, 0)),
             representation: Representation::Unknown,
         }
     }

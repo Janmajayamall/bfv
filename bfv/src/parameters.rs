@@ -1,7 +1,7 @@
 use crate::modulus::Modulus;
 use crate::nb_theory::generate_primes_vec;
-use crate::poly::{poly_context::PolyContext, Poly, PolyContext, Representation};
-use crate::utils::mod_inverse_biguint;
+use crate::poly::{poly_context::PolyContext, Poly, Representation};
+use crate::utils::{mod_inverse_biguint, mod_inverse_biguint_u64};
 use itertools::{izip, Itertools};
 use ndarray::{Array2, Array3};
 use num_bigint::BigUint;
@@ -10,6 +10,7 @@ use num_traits::{One, Pow, ToPrimitive};
 use std::vec;
 use traits::Ntt;
 
+#[derive(PartialEq, Debug, Clone)]
 pub enum PolyType {
     Q,
     P,
@@ -165,10 +166,10 @@ where
         let mut q_biguint = BigUint::one();
         let mut p_biguint = BigUint::one();
         ciphertext_moduli.iter().for_each(|qi| {
-            q_biguint *= qi;
+            q_biguint *= *qi;
         });
         extension_moduli.iter().for_each(|pi| {
-            p_biguint *= pi;
+            p_biguint *= *pi;
         });
 
         // What's happening here? Well we intend to store parameters for a level at levelth index, because
@@ -177,17 +178,17 @@ where
         // q0,...,qmax-1 and so on and so forth, we need to process moduli chain starting at max length, which
         // implies processing ciphertext_moduli in reverese order below.
         let mut q_biguint_clone = q_biguint.clone();
-        let ql = vec![];
+        let mut ql = vec![];
         ciphertext_moduli.iter().rev().for_each(|qi| {
             ql.push(q_biguint_clone.clone());
-            q_biguint_clone /= qi;
+            q_biguint_clone /= *qi;
         });
 
         let mut p_biguint_clone = p_biguint.clone();
-        let pl = vec![];
+        let mut pl = vec![];
         extension_moduli.iter().rev().for_each(|pi| {
             pl.push(p_biguint_clone.clone());
-            p_biguint_clone /= pi;
+            p_biguint_clone /= *pi;
         });
 
         let q_size = ciphertext_moduli.len();
@@ -196,13 +197,13 @@ where
         let mut ql_hat = vec![];
         let mut ql_hat_inv = vec![];
         for i in 0..q_size {
-            let q = ql[i];
+            let q = &ql[i];
             let mut q_hat = vec![];
             let mut q_hat_inv = vec![];
             for j in 0..(q_size - i) {
                 let qj = ciphertext_moduli[j];
                 q_hat.push(q / qj);
-                q_hat_inv.push(mod_inverse_biguint(&(q / qj), qj).to_u64().unwrap());
+                q_hat_inv.push(mod_inverse_biguint_u64(&(q / qj), qj).to_u64().unwrap());
             }
             ql_hat.push(q_hat);
             ql_hat_inv.push(q_hat_inv);
@@ -212,60 +213,69 @@ where
         let mut ql_modt = vec![];
         let mut neg_t_inv_modql = vec![];
         for i in 0..q_size {
-            let q = ql[i];
-            ql_modt.push(q % plaintext_modulus);
+            let q = &ql[i];
+            ql_modt.push((q % plaintext_modulus).to_u64().unwrap());
+            let neg_t_inv_modq = mod_inverse_biguint(&(q - plaintext_modulus), &q);
 
-            let neg_t_inv_modq = mod_inverse_biguint(&(&q - plaintext_modulus), &q);
+            let ctx = PolyContext {
+                moduli_count: q_size - i,
+                moduli_ops: (&ciphertext_moduli_ops[..q_size - i], &[]),
+                ntt_ops: (&ciphertext_ntt_ops[..q_size - i], &[]),
+                degree,
+            };
 
-            let moduli_ops = &ciphertext_moduli_ops[..q_size - i];
-            let ntt_ops = &ciphertext_moduli_ops[..q_size - i];
-            // let mut neg_t_inv_modq = Poly::try_convert_from_biguint(
-            //     &vec![neg_t_inv_modq],
-            //     moduli_ops,
-            //     degree,
-            //     Representation::Coefficient,
-            // );
-            neg_t_inv_modq.change_representation(ntt_ops, Representation::Evaluation);
+            let mut neg_t_inv_modq =
+                ctx.try_convert_from_biguint(&vec![neg_t_inv_modq], Representation::Coefficient);
+            ctx.change_representation(&mut neg_t_inv_modq, Representation::Evaluation);
             neg_t_inv_modql.push(neg_t_inv_modq);
         }
 
         // DECRYPTION //
         let b_bits = ciphertext_moduli_sizes.iter().max().unwrap() / 2;
-        let t_ql_hat_inv_modql_divql_modt = vec![];
-        let t_bql_hat_inv_modql_divql_modt = vec![];
-        let t_ql_hat_inv_modql_divql_frac = vec![];
-        let t_bql_hat_inv_modql_divql_frac = vec![];
+        let mut t_ql_hat_inv_modql_divql_modt = vec![];
+        let mut t_bql_hat_inv_modql_divql_modt = vec![];
+        let mut t_ql_hat_inv_modql_divql_frac = vec![];
+        let mut t_bql_hat_inv_modql_divql_frac = vec![];
         for i in 0..q_size {
-            let q = ql[i];
+            let q = &ql[i];
 
             // let a = [(Q/qi)^-1]_qi and b = 1<<b_bits, where qi is q[i]. The idea is to calculate
             // rational and fraction part of a/qi and a*([b]_qi)/qi
             // (t*a)/qi (mod t)
-            let rationals = vec![];
+            let mut rationals = vec![];
             // (t*[a*b]_qi)/qi (mod t)
-            let brationals = vec![];
+            let mut brationals = vec![];
             // ((t*a)%qi)/qi
-            let fractionals = vec![];
+            let mut fractionals = vec![];
             // ((t*[a*b]_qi)%qi)/qi
-            let bfractionals = vec![];
+            let mut bfractionals = vec![];
             for j in 0..(q_size - i) {
                 let qi = ciphertext_moduli[j];
 
                 // [(Q/qi)^-1]_qi
-                let qi_hat_inv = mod_inverse_biguint(&(q / qi), &qi.try_into().unwrap())
-                    .to_u64()
-                    .unwrap();
+                let qi_hat_inv = mod_inverse_biguint_u64(&(q / qi), qi);
 
                 let b_modqi = (1 << b_bits) % qi;
 
-                rationals.push(((plaintext_modulus * qi_hat_inv) / qi) % plaintext_modulus);
+                rationals.push(
+                    (((plaintext_modulus * &qi_hat_inv) / qi) % plaintext_modulus)
+                        .to_u64()
+                        .unwrap(),
+                );
                 brationals.push(
-                    ((plaintext_modulus * ((qi_hat_inv * b_modqi) % qi)) / qi) % plaintext_modulus,
+                    (((plaintext_modulus * ((&qi_hat_inv * b_modqi) % qi)) / qi)
+                        % plaintext_modulus)
+                        .to_u64()
+                        .unwrap(),
                 );
 
-                fractionals.push(((plaintext_modulus * qi_hat_inv) % qi) as f64 / qi as f64);
+                fractionals
+                    .push(((plaintext_modulus * &qi_hat_inv) % qi).to_f64().unwrap() / qi as f64);
                 bfractionals.push(
-                    ((plaintext_modulus * ((qi_hat_inv * b_modqi) % qi)) % qi) as f64 / qi as f64,
+                    ((plaintext_modulus * ((&qi_hat_inv * b_modqi) % qi)) % qi)
+                        .to_f64()
+                        .unwrap()
+                        / qi as f64,
                 );
             }
 
@@ -281,18 +291,18 @@ where
         let mut neg_pql_hat_inv_modql_shoup = vec![];
         let mut ql_inv_modpl = vec![];
         for i in 0..q_size {
-            let q = ql[i];
-            let p = pl[i];
+            let q = &ql[i];
+            let p = &pl[i];
 
             // [-p*((Q/qi)^-1)]_qi for each qi in q
-            let neg_pqi_hat_inv_modqi = vec![];
-            let neg_pqi_hat_inv_modqi_shoup = vec![];
+            let mut neg_pqi_hat_inv_modqi = vec![];
+            let mut neg_pqi_hat_inv_modqi_shoup = vec![];
 
             for j in 0..(q_size - i) {
                 let qi = ciphertext_moduli[j];
-                let modqi = ciphertext_moduli_ops[j];
+                let modqi = &ciphertext_moduli_ops[j];
                 let tmp = (qi
-                    - ((p * mod_inverse_biguint(&(q / qi), qi.try_into().unwrap())) % qi))
+                    - ((p * mod_inverse_biguint_u64(&(q / qi), qi.try_into().unwrap())) % qi))
                     .to_u64()
                     .unwrap();
                 neg_pqi_hat_inv_modqi.push(tmp);
@@ -302,9 +312,9 @@ where
             neg_pql_hat_inv_modql_shoup.push(neg_pqi_hat_inv_modqi_shoup);
 
             // [qi^-1]_pj
-            let q_inv_modp = vec![];
+            let mut q_inv_modp = vec![];
             for k in 0..(p_size - i) {
-                let modpk = extension_moduli_ops[k];
+                let modpk = &extension_moduli_ops[k];
                 for j in 0..(q_size - i) {
                     let qi = ciphertext_moduli[j];
                     q_inv_modp.push(modpk.inv(qi % modpk.modulus()))
@@ -321,10 +331,10 @@ where
         let mut pl_inv = vec![];
         let mut alphal_modql = vec![];
         for i in 0..p_size {
-            let p = pl[i];
+            let p = &pl[i];
 
             // (p/pj) % qi
-            let p_hat_modq = vec![];
+            let mut p_hat_modq = vec![];
             for k in 0..(q_size - i) {
                 let qi = ciphertext_moduli[k];
                 for j in 0..(p_size - i) {
@@ -336,15 +346,13 @@ where
                 .push(Array2::from_shape_vec((q_size - i, p_size - i), p_hat_modq).unwrap());
 
             // [(p/pj)^-1]_pj
-            let p_hat_inv_modp = vec![];
-            let p_hat_inv_modp_shoup = vec![];
-            let p_inv = vec![];
+            let mut p_hat_inv_modp = vec![];
+            let mut p_hat_inv_modp_shoup = vec![];
+            let mut p_inv = vec![];
             for j in 0..(p_size - i) {
                 let pj = extension_moduli[j];
-                let modpj = extension_moduli_ops[j];
-                let tmp = mod_inverse_biguint(&(p / pj), pj.try_into().unwrap())
-                    .to_u64()
-                    .unwrap();
+                let modpj = &extension_moduli_ops[j];
+                let tmp = mod_inverse_biguint_u64(&(p / pj), pj).to_u64().unwrap();
                 p_hat_inv_modp.push(tmp);
                 p_hat_inv_modp_shoup.push(modpj.compute_shoup(tmp));
                 p_inv.push(1.0 / (pj as f64));
@@ -356,7 +364,7 @@ where
             // [\alpha*p]_qk
             // \alpha can be in range 0..(p_size-i)+1. So
             // we pre-compute its representation in modqk.
-            let alpha_modq = vec![];
+            let mut alpha_modq = vec![];
             for k in 0..(q_size - i) {
                 let qk = ciphertext_moduli[k];
                 for i in 0..(p_size - i + 1) {
@@ -373,8 +381,8 @@ where
         let mut tql_pl_hat_inv_modpl_divpl_frachi = vec![];
         let mut tql_pl_hat_inv_modpl_divpl_fraclo = vec![];
         for i in 0..p_size {
-            let pq = pl[i] * ql[i];
-            let q = ql[i];
+            let pq = &pl[i] * &ql[i];
+            let q = &ql[i];
 
             // ([(pq/pj)^-1]_pj * tq)/pj (mod qi)
             let mut tq_p_hat_inv_modp_divp_modq = vec![];
@@ -386,21 +394,21 @@ where
             let mut tmp = vec![];
             for j in 0..(p_size - i) {
                 let pj = extension_moduli[j];
-                tmp.push(plaintext_modulus * q * mod_inverse_biguint(&(pq / pj), pj));
+                tmp.push(plaintext_modulus * q * mod_inverse_biguint_u64(&(&pq / pj), pj));
             }
 
             for k in 0..(q_size - i) {
                 let qk = ciphertext_moduli[k];
-                let modqk = ciphertext_moduli_ops[k];
+                let modqk = &ciphertext_moduli_ops[k];
 
                 for j in 0..(p_size - i) {
                     let pj = extension_moduli[j];
 
                     // rational
-                    tq_p_hat_inv_modp_divp_modq.push(((tmp[j] / pj) % qk).to_u64().unwrap());
+                    tq_p_hat_inv_modp_divp_modq.push(((&tmp[j] / pj) % qk).to_u64().unwrap());
 
                     // fractional
-                    let mut rem = tmp[j] % pj;
+                    let mut rem = &tmp[j] % pj;
                     rem <<= 127;
                     rem /= pj;
                     let rem = rem.to_u128().unwrap();
@@ -409,7 +417,7 @@ where
                 }
 
                 // Handle rational value for qi. Fractional is 0 since `qi|tQ`
-                let v = plaintext_modulus * q * mod_inverse_biguint(&(pq / qk), qk);
+                let v = plaintext_modulus * q * mod_inverse_biguint_u64(&(&pq / qk), qk);
                 tq_p_hat_inv_modp_divp_modq.push(((v / qk) % qk).to_u64().unwrap());
             }
 
@@ -422,22 +430,22 @@ where
         }
 
         // Switch CRT basis Q to P //
-        let ql_hat_modpl = vec![];
-        let ql_hat_inv_modql = vec![];
-        let ql_hat_inv_modql_shoup = vec![];
-        let ql_inv = vec![];
-        let alphal_modpl = vec![];
+        let mut ql_hat_modpl = vec![];
+        let mut ql_hat_inv_modql = vec![];
+        let mut ql_hat_inv_modql_shoup = vec![];
+        let mut ql_inv = vec![];
+        let mut alphal_modpl = vec![];
         for i in 0..q_size {
-            let q = ql[i];
+            let q = &ql[i];
 
             // [(q/qj)^-1]_qj
-            let q_hat_inv_modq = vec![];
-            let q_hat_inv_modq_shoup = vec![];
-            let q_inv = vec![];
+            let mut q_hat_inv_modq = vec![];
+            let mut q_hat_inv_modq_shoup = vec![];
+            let mut q_inv = vec![];
             for j in 0..(q_size - i) {
                 let qj = ciphertext_moduli[j];
-                let modqj = ciphertext_moduli_ops[j];
-                let tmp = mod_inverse_biguint(&(q / qj), qj).to_u64().unwrap();
+                let modqj = &ciphertext_moduli_ops[j];
+                let tmp = mod_inverse_biguint_u64(&(q / qj), qj).to_u64().unwrap();
                 q_hat_inv_modq.push(tmp);
                 q_hat_inv_modq_shoup.push(modqj.compute_shoup(tmp));
                 q_inv.push(1.0 / qj as f64);
@@ -455,14 +463,15 @@ where
                     q_hat_modp.push(((q / qj) % pk).to_u64().unwrap());
                 }
             }
-            ql_hat_modpl.push(q_hat_modp);
+            ql_hat_modpl
+                .push(Array2::from_shape_vec((p_size - i, q_size - i), q_hat_modp).unwrap());
 
             // [\alpha * q]_p
             let mut alpha_modp = vec![];
             for k in 0..(p_size - i) {
                 let pk = extension_moduli[k];
                 for j in 0..(q_size - i + 1) {
-                    alpha_modp(((q * j) % pk).to_u64().unwrap());
+                    alpha_modp.push(((q * j) % pk).to_u64().unwrap());
                 }
             }
             alphal_modpl
@@ -474,9 +483,9 @@ where
         for i in 0..q_size {
             let last_qi = ciphertext_moduli[q_size - i - 1];
 
-            let lastq_inv_modq = vec![];
+            let mut lastq_inv_modq = vec![];
             for j in 0..(q_size - i - 1) {
-                let modqi = ciphertext_moduli_ops[j];
+                let modqi = &ciphertext_moduli_ops[j];
                 lastq_inv_modq.push(modqi.inv(last_qi));
             }
             lastq_inv_modql.push(lastq_inv_modq);
@@ -507,11 +516,11 @@ where
         let special_moduli = generate_primes_vec(&[aux_bits; ALPHA], degree, &ciphertext_moduli);
         let special_moduli_ops = special_moduli
             .iter()
-            .map(|pj| Modulus::new(pj))
+            .map(|pj| Modulus::new(*pj))
             .collect_vec();
         let special_moduli_ntt_ops = special_moduli
             .iter()
-            .map(|pj| T::new(degree, pj))
+            .map(|pj| T::new(degree, *pj))
             .collect_vec();
 
         BfvParameters {
@@ -521,7 +530,7 @@ where
             extension_moduli_ops,
             ciphertext_ntt_ops,
             extension_ntt_ops,
-            ciphertext_moduli_sizes: ciphertext_moduli_sizes.to_vec().into_boxed_slice(),
+            ciphertext_moduli_sizes: ciphertext_moduli_sizes.to_vec(),
             max_level: q_size - 1,
             q_size,
             p_size,
@@ -588,24 +597,26 @@ where
         let level_index = self.q_size - level;
         match poly_type {
             PolyType::Q => PolyContext {
-                moduli_ops: self.ciphertext_moduli_ops[..level_index].iter(),
-                ntt_ops: self.ciphertext_ntt_ops[..level_index].iter(),
+                moduli_ops: (&self.ciphertext_moduli_ops[..level_index], &[]),
+                ntt_ops: (&self.ciphertext_ntt_ops[..level_index], &[]),
                 moduli_count: level_index,
                 degree: self.degree,
             },
             PolyType::P => PolyContext {
-                moduli_ops: self.extension_moduli_ops[..level_index].iter(),
-                ntt_ops: self.extension_ntt_ops[..level_index].iter(),
+                moduli_ops: (&self.extension_moduli_ops[..level_index], &[]),
+                ntt_ops: (&self.extension_ntt_ops[..level_index], &[]),
                 moduli_count: level_index,
                 degree: self.degree,
             },
             PolyType::PQ => PolyContext {
-                moduli_ops: self.extension_moduli_ops[..level_index]
-                    .iter()
-                    .chain(self.ciphertext_moduli_ops[..level_index].iter()),
-                ntt_ops: self.extension_ntt_ops[..level_index]
-                    .iter()
-                    .chain(self.ciphertext_ntt_ops[..level_index].iter()),
+                moduli_ops: (
+                    &self.extension_moduli_ops[..level_index],
+                    &self.ciphertext_moduli_ops[..level_index],
+                ),
+                ntt_ops: (
+                    &self.extension_ntt_ops[..level_index],
+                    &self.ciphertext_ntt_ops[..level_index],
+                ),
                 moduli_count: level_index * 2,
                 degree: self.degree,
             },
@@ -616,12 +627,14 @@ where
                 degree: self.degree,
             },
             PolyType::QP => PolyContext {
-                moduli_ops: self.ciphertext_moduli_ops[..level_index]
-                    .iter()
-                    .chain(self.special_moduli_ops.iter()),
-                ntt_ops: self.ciphertext_ntt_ops[..level_index]
-                    .iter()
-                    .chain(self.special_moduli_ntt_ops.iter()),
+                moduli_ops: (
+                    &self.ciphertext_moduli_ops[..level_index],
+                    &self.special_moduli_ops,
+                ),
+                ntt_ops: (
+                    &self.ciphertext_ntt_ops[..level_index],
+                    &self.special_moduli_ntt_ops,
+                ),
                 moduli_count: level_index + self.alpha,
                 degree: self.degree,
             },
