@@ -2,6 +2,8 @@ use bfv::{
     nb_theory::generate_primes_vec,
     parameters::BfvParameters,
     poly::{Poly, PolyContext, Representation},
+    utils::mod_inverse_biguint_u64,
+    HybridKeySwitchingKey, PolyType, SecretKey,
 };
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use fhe_math::zq::ntt::NttOperator;
@@ -10,8 +12,8 @@ use ndarray::Array2;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{FromPrimitive, ToPrimitive};
 use rand::thread_rng;
-use std::sync::Arc;
 use std::time::Duration;
+use std::{fmt::format, sync::Arc};
 use traits::Ntt;
 
 fn bench_poly(c: &mut Criterion) {
@@ -20,323 +22,214 @@ fn bench_poly(c: &mut Criterion) {
     group.sample_size(100);
     let batch_size = BatchSize::NumBatches(1000);
 
-    let plaintext_modulus = 65537;
-    let degree = 1 << 15;
-
     let mut rng = thread_rng();
 
-    //TODO: add support for multiple polynomial degrees
-    {
-        let bfv_params = BfvParameters::default(2, 1 << 15);
-        let q_ctx = bfv_params.ciphertext_poly_contexts[1].clone();
-        let q = Poly::random(&q_ctx, &Representation::Coefficient, &mut rng);
-        group.bench_function(BenchmarkId::new("scale_and_round_decryption", ""), |b| {
-            b.iter(|| {
-                q.scale_and_round_decryption(
-                    &bfv_params.plaintext_modulus_op,
-                    bfv_params.max_bit_size_by2,
-                    &bfv_params.t_qlhat_inv_modql_divql_modt[1],
-                    &bfv_params.t_bqlhat_inv_modql_divql_modt[1],
-                    &bfv_params.t_qlhat_inv_modql_divql_frac[1],
-                    &bfv_params.t_bqlhat_inv_modql_divql_frac[1],
-                )
-            })
-        });
-    }
+    for degree in [1 << 15] {
+        let params = BfvParameters::default(15, degree);
+        let level = 0;
 
-    {
-        let bfv_params = BfvParameters::default(15, 1 << 15);
+        let q_ctx = params.poly_ctx(&PolyType::Q, level);
+        let p_ctx = params.poly_ctx(&PolyType::P, level);
+        let pq_ctx = params.poly_ctx(&PolyType::PQ, level);
+        let qp_ctx = params.poly_ctx(&PolyType::QP, level);
 
-        let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
-        let p_context = bfv_params.extension_poly_contexts[0].clone();
-        let pq_context = bfv_params.pq_poly_contexts[0].clone();
-
-        let pq_poly = Poly::random(&pq_context, &Representation::Coefficient, &mut rng);
-
-        group.bench_function(BenchmarkId::new("scale_and_round", ""), |b| {
-            b.iter(|| {
-                pq_poly.scale_and_round(
-                    &q_context,
-                    &p_context,
-                    &q_context,
-                    &bfv_params.tql_p_hat_inv_modp_divp_modql[0],
-                    &bfv_params.tql_p_hat_inv_modp_divp_frac_hi[0],
-                    &bfv_params.tql_p_hat_inv_modp_divp_frac_lo[0],
-                );
-            })
-        });
-    }
-
-    {
-        let bfv_params = BfvParameters::default(15, 1 << 15);
-
-        let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
-        let p_context = bfv_params.extension_poly_contexts[0].clone();
-        let mut q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
-
-        group.bench_function(BenchmarkId::new("fast_conv_p_over_q", ""), |b| {
-            b.iter(|| {
-                q_poly.fast_conv_p_over_q(
-                    &p_context,
-                    &bfv_params.neg_pql_hat_inv_modql[0],
-                    &bfv_params.neg_pql_hat_inv_modql_shoup[0],
-                    &bfv_params.ql_inv[0],
-                    &bfv_params.ql_inv_modp[0],
-                );
-            })
-        });
-    }
-
-    {
-        let bfv_params = BfvParameters::default(15, 1 << 15);
-
-        let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
-        let p_context = bfv_params.extension_poly_contexts[0].clone();
-        let pq_context = bfv_params.pq_poly_contexts[0].clone();
-        let mut q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
-
+        let q_poly = q_ctx.random(Representation::Coefficient, &mut rng);
+        dbg!(q_poly.coefficients.shape());
         group.bench_function(
-            BenchmarkId::new("fast_expand_crt_basis_p_over_q", ""),
+            BenchmarkId::new(
+                "scale_and_round_decryption",
+                format!("n={degree}/level={level}"),
+            ),
             |b| {
                 b.iter(|| {
-                    q_poly.fast_expand_crt_basis_p_over_q(
-                        &p_context,
-                        &pq_context,
-                        &bfv_params.neg_pql_hat_inv_modql[0],
-                        &bfv_params.neg_pql_hat_inv_modql_shoup[0],
-                        &bfv_params.ql_inv[0],
-                        &bfv_params.ql_inv_modp[0],
-                        &bfv_params.pl_hat_modq[0],
-                        &bfv_params.pl_hat_inv_modpl[0],
-                        &bfv_params.pl_hat_inv_modpl_shoup[0],
-                        &bfv_params.pl_inv[0],
-                        &bfv_params.alphal_modq[0],
+                    let _ = q_ctx.scale_and_round_decryption(
+                        &q_poly,
+                        &params.plaintext_modulus_op,
+                        params.max_bit_size_by2,
+                        &params.t_ql_hat_inv_modql_divql_modt[level],
+                        &params.t_bql_hat_inv_modql_divql_modt[level],
+                        &params.t_ql_hat_inv_modql_divql_frac[level],
+                        &params.t_bql_hat_inv_modql_divql_frac[level],
                     );
                 })
             },
         );
-    }
 
-    {
-        let bfv_params = BfvParameters::default(15, 1 << 15);
-        let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
-        let p_context = bfv_params.extension_poly_contexts[0].clone();
-        let mut q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
-
-        group.bench_function(BenchmarkId::new("switch_crt_basis", ""), |b| {
-            b.iter(|| {
-                q_poly.switch_crt_basis(
-                    &p_context,
-                    &bfv_params.ql_hat_modp[0],
-                    &bfv_params.ql_hat_inv_modql[0],
-                    &bfv_params.ql_hat_inv_modql_shoup[0],
-                    &bfv_params.ql_inv[0],
-                    &bfv_params.alphal_modp[0],
-                );
-            })
-        });
-    }
-
-    {
-        let bfv_params = BfvParameters::default(15, 1 << 15);
-        let q_poly = Poly::random(
-            &bfv_params.ciphertext_poly_contexts[0],
-            &Representation::Coefficient,
-            &mut rng,
+        let pq_poly = pq_ctx.random(Representation::Coefficient, &mut rng);
+        group.bench_function(
+            BenchmarkId::new("scale_and_round", format!("n={degree}/level={level}")),
+            |b| {
+                b.iter(|| {
+                    let _ = pq_ctx.scale_and_round(
+                        &pq_poly,
+                        &q_ctx,
+                        &p_ctx,
+                        &q_ctx,
+                        &params.tql_pl_hat_inv_modpl_divpl_modql[level],
+                        &params.tql_pl_hat_inv_modpl_divpl_frachi[level],
+                        &params.tql_pl_hat_inv_modpl_divpl_fraclo[level],
+                    );
+                })
+            },
         );
-        group.bench_function(BenchmarkId::new("expand_crt_basis", ""), |b| {
-            b.iter(|| {
-                q_poly.expand_crt_basis(
-                    &bfv_params.pq_poly_contexts[0],
-                    &bfv_params.extension_poly_contexts[0],
-                    &bfv_params.ql_hat_modp[0],
-                    &bfv_params.ql_hat_inv_modql[0],
-                    &bfv_params.ql_hat_inv_modql_shoup[0],
-                    &bfv_params.ql_inv[0],
-                    &bfv_params.alphal_modp[0],
-                );
-            })
-        });
-    }
 
-    {
-        let bfv_params = BfvParameters::default(15, 1 << 15);
-        let p_moduli = generate_primes_vec(
-            &vec![60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
-            degree,
-            &[],
+        group.bench_function(
+            BenchmarkId::new("fast_conv_p_over_q", format!("n={degree}/level={level}")),
+            |b| {
+                b.iter(|| {
+                    let _ = q_ctx.fast_conv_p_over_q(
+                        &q_poly,
+                        &p_ctx,
+                        &params.neg_pql_hat_inv_modql[level],
+                        &params.neg_pql_hat_inv_modql_shoup[level],
+                        &params.ql_inv[level],
+                        &params.ql_inv_modpl[level],
+                    );
+                })
+            },
         );
-        let q_moduli = generate_primes_vec(&vec![60, 60, 60], degree, &p_moduli);
 
-        let q_context = Arc::new(PolyContext::<NttOperator>::new(&q_moduli, degree));
-        let p_context = Arc::new(PolyContext::<NttOperator>::new(&p_moduli, degree));
-
-        // Pre-computation
-        let mut q_hat_inv_modq = vec![];
-        let mut q_hat_modp = vec![];
-        let q = q_context.modulus();
-        let q_dig = q_context.modulus_dig();
-        izip!(q_context.moduli.iter()).for_each(|(qi)| {
-            let qi_hat_inv_modqi = (&q_dig / *qi)
-                .mod_inverse(BigUintDig::from_u64(*qi).unwrap())
-                .unwrap()
-                .to_biguint()
-                .unwrap()
-                .to_u64()
-                .unwrap();
-
-            q_hat_inv_modq.push(qi_hat_inv_modqi);
-
-            izip!(p_moduli.iter())
-                .for_each(|pj| q_hat_modp.push(((&q / qi) % pj).to_u64().unwrap()));
-        });
-        let q_hat_modp =
-            Array2::<u64>::from_shape_vec((q_context.moduli.len(), p_moduli.len()), q_hat_modp)
-                .unwrap();
-        let q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
-
-        group.bench_function(BenchmarkId::new("approximate_switch_crt_basis", ""), |b| {
-            b.iter(|| {
-                Poly::<NttOperator>::approx_switch_crt_basis(
-                    &q_poly.coefficients.view(),
-                    &q_context.moduli_ops,
-                    q_context.degree,
-                    &q_hat_inv_modq,
-                    &q_hat_modp,
-                    &p_context.moduli_ops,
-                );
-            })
-        });
-    }
-
-    {
-        let q_moduli = generate_primes_vec(
-            &vec![60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60],
-            degree,
-            &[],
+        group.bench_function(
+            BenchmarkId::new("switch_crt_basis", format!("n={degree}/level={level}")),
+            |b| {
+                b.iter(|| {
+                    let _ = q_ctx.switch_crt_basis(
+                        &q_poly,
+                        &p_ctx,
+                        &params.ql_hat_modpl[level],
+                        &params.ql_hat_inv_modql[level],
+                        &params.ql_hat_inv_modql_shoup[level],
+                        &params.ql_inv[level],
+                        &params.alphal_modpl[level],
+                    );
+                })
+            },
         );
-        let p_moduli = generate_primes_vec(&vec![60, 60, 60], degree, &q_moduli);
-        let qp_moduli = [q_moduli.clone(), p_moduli.clone()].concat();
 
-        let q_context = Arc::new(PolyContext::<NttOperator>::new(&q_moduli, degree));
-        let p_context = Arc::new(PolyContext::<NttOperator>::new(&p_moduli, degree));
-        let qp_context = Arc::new(PolyContext::<NttOperator>::new(&qp_moduli, degree));
+        group.bench_function(
+            BenchmarkId::new(
+                "fast_expand_crt_basis_p_over_q",
+                format!("n={degree}/level={level}"),
+            ),
+            |b| {
+                b.iter(|| {
+                    let _ = q_ctx.fast_expand_crt_basis_p_over_q(
+                        &q_poly,
+                        &p_ctx,
+                        &pq_ctx,
+                        &params.neg_pql_hat_inv_modql[level],
+                        &params.neg_pql_hat_inv_modql_shoup[level],
+                        &params.ql_inv[level],
+                        &params.ql_inv_modpl[level],
+                        &params.pl_hat_modql[level],
+                        &params.pl_hat_inv_modpl[level],
+                        &params.pl_hat_inv_modpl_shoup[level],
+                        &params.pl_inv[level],
+                        &params.alphal_modql[level],
+                    );
+                })
+            },
+        );
 
-        // just few checks
-        let q_size = q_context.moduli.len();
-        let p_size = p_context.moduli.len();
-        let qp_size: usize = q_size + p_size;
+        group.bench_function(
+            BenchmarkId::new("expand_crt_basis", format!("n={degree}/level={level}")),
+            |b| {
+                b.iter(|| {
+                    let _ = q_ctx.expand_crt_basis(
+                        &q_poly,
+                        &pq_ctx,
+                        &p_ctx,
+                        &params.ql_hat_modpl[level],
+                        &params.ql_hat_inv_modql[level],
+                        &params.ql_hat_inv_modql_shoup[level],
+                        &params.ql_inv[level],
+                        &params.alphal_modpl[level],
+                    );
+                })
+            },
+        );
 
-        // Pre computation
-        let p = p_context.modulus();
-        let p_dig = p_context.modulus_dig();
-        let mut p_hat_inv_modp = vec![];
-        let mut p_hat_modq = vec![];
-        p_context.moduli.iter().for_each(|(pi)| {
-            p_hat_inv_modp.push(
-                (&p_dig / pi)
-                    .mod_inverse(BigUintDig::from_u64(*pi).unwrap())
-                    .unwrap()
-                    .to_biguint()
-                    .unwrap()
-                    .to_u64()
-                    .unwrap(),
-            );
+        group.bench_function(
+            BenchmarkId::new("mod_down_next", format!("n={degree}/level={level}")),
+            |b| {
+                b.iter_batched(
+                    || q_poly.clone(),
+                    |mut p| {
+                        q_ctx.mod_down_next(&mut p, &params.lastq_inv_modql[0]);
+                    },
+                    batch_size,
+                )
+            },
+        );
 
-            // pi_hat_modq
-            let p_hat = &p / pi;
-            q_context
-                .moduli
-                .iter()
-                .for_each(|qi| p_hat_modq.push((&p_hat % qi).to_u64().unwrap()));
-        });
-        let p_hat_modq =
-            Array2::from_shape_vec((p_context.moduli.len(), q_context.moduli.len()), p_hat_modq)
-                .unwrap();
-        let mut p_inv_modq = vec![];
-        q_context.moduli.iter().for_each(|qi| {
-            p_inv_modq.push(
-                p_dig
-                    .clone()
-                    .mod_inverse(BigUintDig::from_u64(*qi).unwrap())
-                    .unwrap()
-                    .to_biguint()
-                    .unwrap()
-                    .to_u64()
-                    .unwrap(),
-            );
-        });
+        // We need to special handle case for approx_switch_crt_basis and approx_mod_down. For approx_switch_crt_basis
+        // we generate a polynomial in specialP basis (moduli chain of length 3) and switch it to QP basis. This imitates the behaviour
+        // of approx_switch_crt_basis in hybrid key switching, where a polynomial with moduli chain of 3 is switched to QP.
+        // For approx_mod_down we switch a polynomial in QP basis to Q basis. This again imitates the expected behaviour
+        // of approx_mod_down in hybrid key switching.
+        {
+            let specialp_ctx = params.poly_ctx(&PolyType::P, level);
+            let p = specialp_ctx.big_q();
+            let mut p_hat_inv_modp = vec![];
+            let mut p_hat_modq = vec![];
+            specialp_ctx.iter_moduli_ops().for_each(|(modpi)| {
+                p_hat_inv_modp.push(
+                    mod_inverse_biguint_u64(&(&p / modpi.modulus()), modpi.modulus())
+                        .to_u64()
+                        .unwrap(),
+                );
+            });
+            qp_ctx.iter_moduli_ops().for_each(|modqj| {
+                specialp_ctx.iter_moduli_ops().for_each(|(modpi)| {
+                    p_hat_modq.push(((&p / modpi.modulus()) % modqj.modulus()).to_u64().unwrap());
+                });
+            });
+            let p_hat_modq = Array2::from_shape_vec(
+                (qp_ctx.moduli_count(), specialp_ctx.moduli_count()),
+                p_hat_modq,
+            )
+            .unwrap();
+            let mut p_inv_modq = vec![];
+            qp_ctx.iter_moduli_ops().for_each(|modqi| {
+                p_inv_modq.push(
+                    mod_inverse_biguint_u64(&p, modqi.modulus())
+                        .to_u64()
+                        .unwrap(),
+                );
+            });
 
-        let mut qp_poly = Poly::random(&qp_context, &Representation::Evaluation, &mut rng);
-        group.bench_function(BenchmarkId::new("approximate_mod_down", ""), |b| {
-            b.iter_batched(
-                || qp_poly.clone(),
-                |mut p| {
-                    p.approx_mod_down(
-                        &q_context,
-                        &p_context,
+            let specialp_poly = specialp_ctx.random(Representation::Coefficient, &mut rng);
+            group.bench_function(BenchmarkId::new("approx_switch_crt_basis", ""), |b| {
+                b.iter(|| {
+                    PolyContext::<NttOperator>::approx_switch_crt_basis(
+                        &specialp_poly.coefficients.view(),
+                        specialp_ctx.moduli_ops(),
+                        degree,
                         &p_hat_inv_modp,
                         &p_hat_modq,
-                        &p_inv_modq,
+                        qp_ctx.moduli_ops(),
                     );
-                },
-                batch_size,
-            )
-        });
-    }
+                })
+            });
 
-    {
-        let params = BfvParameters::default(15, 1 << 15);
-        let q_ctx = params.ciphertext_ctx_at_level(0);
-        let q_poly = Poly::random(&q_ctx, &Representation::Coefficient, &mut rng);
-        group.bench_function(BenchmarkId::new("mod_down_next", ""), |b| {
-            b.iter_batched(
-                || q_poly.clone(),
-                |mut p| {
-                    p.mod_down_next(
-                        &params.lastq_inv_modq[0],
-                        &params.ciphertext_ctx_at_level(1),
-                    );
-                },
-                batch_size,
-            )
-        });
-    }
-
-    {
-        let params = BfvParameters::default(15, 1 << 15);
-        let q_poly = Poly::random(
-            &params.ciphertext_ctx_at_level(0),
-            &Representation::Coefficient,
-            &mut rng,
-        );
-        group.bench_function(BenchmarkId::new("change_representation", ""), |b| {
-            b.iter_batched(
-                || q_poly.clone(),
-                |mut p| {
-                    p.change_representation(Representation::Evaluation);
-                },
-                batch_size,
-            )
-        });
-    }
-
-    // Airthmetic operations1
-    for degree in [1 << 11, 1 << 13, 1 << 15] {
-        let params = BfvParameters::default(4, degree);
-        let a0 = Poly::random(
-            &params.ciphertext_ctx_at_level(0),
-            &Representation::Evaluation,
-            &mut rng,
-        );
-        let a1 = Poly::random(
-            &params.ciphertext_ctx_at_level(0),
-            &Representation::Evaluation,
-            &mut rng,
-        );
-        group.bench_function(BenchmarkId::new("mul_assign", format!("n={degree}")), |b| {
-            b.iter_batched(|| a0.clone(), |mut p| p *= &a1, BatchSize::PerIteration)
-        });
+            let qp_poly = qp_ctx.random(Representation::Evaluation, &mut rng);
+            group.bench_function(BenchmarkId::new("approx_mod_down", ""), |b| {
+                b.iter_batched(
+                    || qp_poly.clone(),
+                    |mut p| {
+                        qp_ctx.approx_mod_down(
+                            &mut p,
+                            &q_ctx,
+                            &specialp_ctx,
+                            &p_hat_inv_modp,
+                            &p_hat_modq,
+                            &p_inv_modq,
+                        );
+                    },
+                    batch_size,
+                )
+            });
+        }
     }
 }
 
