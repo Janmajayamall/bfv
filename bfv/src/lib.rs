@@ -6,7 +6,7 @@ pub mod nb_theory;
 pub mod parameters;
 pub mod plaintext;
 pub mod poly;
-// pub mod relinearization_key;
+pub mod relinearization_key;
 pub mod secret_key;
 pub mod utils;
 
