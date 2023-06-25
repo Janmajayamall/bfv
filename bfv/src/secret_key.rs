@@ -1,4 +1,4 @@
-use crate::ciphertext::Ciphertext;
+use crate::evaluator::Ciphertext;
 use crate::parameters::{BfvParameters, PolyType};
 use crate::plaintext::{Encoding, Plaintext};
 use crate::poly::{Poly, Representation};
@@ -129,12 +129,7 @@ impl SecretKey {
         }
     }
 
-    pub fn measure_noise<T: Ntt, R: CryptoRng + RngCore>(
-        &self,
-        ct: &Ciphertext,
-        params: &BfvParameters<T>,
-        rng: &mut R,
-    ) -> u64 {
+    pub fn measure_noise<T: Ntt>(&self, ct: &Ciphertext, params: &BfvParameters<T>) -> u64 {
         // TODO: replace default simd with encoding used for ciphertext. This will require
         // adding encoding info to ciphertext
         let m = self
@@ -193,7 +188,7 @@ mod tests {
         let pt = Plaintext::encode(&m, &params, Encoding::simd(0));
         let ct = sk.encrypt(&params, &pt, &mut rng);
 
-        dbg!(sk.measure_noise(&ct, &params, &mut rng));
+        dbg!(sk.measure_noise(&ct, &params));
 
         let pt2 = sk.decrypt(&ct, &params);
         let m2 = pt2.decode(Encoding::simd(0), &params);

@@ -28,6 +28,15 @@ impl Encoding {
     }
 }
 
+impl Default for Encoding {
+    fn default() -> Self {
+        Encoding {
+            encoding_type: EncodingType::Simd,
+            level: 0,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Plaintext {
     pub(crate) m: Vec<u64>,

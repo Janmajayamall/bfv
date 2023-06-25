@@ -1,106 +1,87 @@
-use num_traits::ToPrimitive;
+use crate::{
+    BfvParameters, Ciphertext, HybridKeySwitchingKey, Modulus, Poly, PolyContext, PolyType,
+    Representation, SecretKey, Substitution,
+};
+
 use rand::{CryptoRng, RngCore};
 use traits::Ntt;
 
-use crate::{
-    Ciphertext, HybridKeySwitchingKey, Modulus, Poly, PolyContext, Representation, SecretKey,
-    Substitution,
-};
-use std::sync::Arc;
-
-pub struct GaloisKey<T: Ntt> {
-    ciphertext_ctx: Arc<PolyContext<T>>,
+pub struct GaloisKey {
     substitution: Substitution,
-    ksk_key: HybridKeySwitchingKey<T>,
+    ksk_key: HybridKeySwitchingKey,
+    level: usize,
 }
 
-impl<T> GaloisKey<T>
-where
-    T: Ntt,
-{
-    pub fn new<R: CryptoRng + RngCore>(
+impl GaloisKey {
+    pub fn new<T: Ntt, R: CryptoRng + RngCore>(
         exponent: usize,
-        ciphertext_ctx: &Arc<PolyContext<T>>,
-        secret_key: &SecretKey<T>,
+        params: &BfvParameters<T>,
+        level: usize,
+        sk: &SecretKey,
         rng: &mut R,
-    ) -> GaloisKey<T> {
-        let substitution = Substitution::new(exponent, ciphertext_ctx.degree);
+    ) -> GaloisKey {
+        let substitution = Substitution::new(exponent, params.degree);
+
+        let q_ctx = params.poly_ctx(&PolyType::Q, level);
+        let qp_ctx = params.poly_ctx(&PolyType::QP, level);
+        let specialp_ctx = params.poly_ctx(&PolyType::SpecialP, level);
 
         // Substitute secret key
-        let mut sk_poly = Poly::try_convert_from_i64_small(
-            secret_key.coefficients.as_ref(),
-            ciphertext_ctx,
-            &crate::Representation::Coefficient,
-        );
-        sk_poly.change_representation(crate::Representation::Evaluation);
-        let sk_poly = sk_poly.substitute(&substitution);
+        let mut sk_poly =
+            q_ctx.try_convert_from_i64_small(&sk.coefficients, Representation::Coefficient);
+        q_ctx.change_representation(&mut sk_poly, Representation::Evaluation);
+
+        let sk_poly = q_ctx.substitute(&sk_poly, &substitution);
 
         // Generate key switching key for substituted secret key
-        let ksk_key = HybridKeySwitchingKey::new(&sk_poly, secret_key, ciphertext_ctx, rng);
+        let ksk_key = HybridKeySwitchingKey::new(
+            &sk_poly,
+            &sk,
+            &q_ctx,
+            &specialp_ctx,
+            &qp_ctx,
+            params.alpha,
+            params.aux_bits,
+            rng,
+        );
 
         GaloisKey {
-            ciphertext_ctx: ciphertext_ctx.clone(),
             substitution,
             ksk_key,
+            level,
         }
     }
 
-    pub fn rotate(&self, ct: &Ciphertext<T>) -> Ciphertext<T> {
-        debug_assert!(ct.c.len() == 2);
+    pub fn rotate<T: Ntt>(&self, ct: &Ciphertext, params: &BfvParameters<T>) -> Ciphertext {
+        assert!(ct.c.len() == 2);
+        assert!(ct.level == self.level);
+        assert!(ct.poly_type == PolyType::Q);
+
+        let level = self.level;
+        let q_ctx = params.poly_ctx(&PolyType::Q, level);
+        let qp_ctx = params.poly_ctx(&PolyType::QP, level);
+        let specialp_ctx = params.poly_ctx(&PolyType::SpecialP, level);
 
         // Key switch c1
-        let mut c1 = ct.c[1].substitute(&self.substitution);
+        let mut c1 = q_ctx.substitute(&ct.c[1], &self.substitution);
         if c1.representation == Representation::Evaluation {
-            c1.change_representation(crate::Representation::Coefficient);
+            q_ctx.change_representation(&mut c1, Representation::Coefficient);
         }
 
-        let (mut cs0, mut cs1) = self.ksk_key.switch(&c1);
+        let (mut cs0, mut cs1) = self.ksk_key.switch(&c1, &qp_ctx, &q_ctx, &specialp_ctx);
 
         // Key switch returns polynomial in Evaluation form
         if ct.c[0].representation != cs0.representation {
-            cs0.change_representation(ct.c[0].representation.clone());
-            cs1.change_representation(ct.c[0].representation.clone());
+            q_ctx.change_representation(&mut cs0, ct.c[0].representation.clone());
+            q_ctx.change_representation(&mut cs1, ct.c[0].representation.clone());
         }
 
-        cs0 += &ct.c[0].substitute(&self.substitution);
+        q_ctx.add_assign(&mut cs0, &q_ctx.substitute(&ct.c[0], &self.substitution));
 
         Ciphertext {
             c: vec![cs0, cs1],
-            params: ct.params.clone(),
-            level: ct.level,
+            poly_type: PolyType::Q,
+            level,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use rand::thread_rng;
-
-    use super::*;
-    use crate::{BfvParameters, Encoding, Plaintext, SecretKey};
-
-    #[test]
-    fn rotation_works() {
-        let bfv_params = Arc::new(BfvParameters::default(12, 1 << 15));
-        let mut rng = thread_rng();
-        let sk = SecretKey::random(&bfv_params, &mut rng);
-
-        let m = bfv_params
-            .plaintext_modulus_op
-            .random_vec(bfv_params.polynomial_degree, &mut rng);
-        let pt = Plaintext::encode(&m, &bfv_params, Encoding::simd(0));
-        let ct = sk.encrypt(&pt, &mut rng);
-        dbg!(sk.measure_noise(&ct, &mut rng));
-        // rotate left by 1
-        let galois_key = GaloisKey::new(3, &bfv_params.ciphertext_poly_contexts[0], &sk, &mut rng);
-
-        let mut ct_rotated = galois_key.rotate(&ct);
-        for _ in 0..1000 {
-            ct_rotated = galois_key.rotate(&ct_rotated);
-        }
-        dbg!(sk.measure_noise(&ct_rotated, &mut rng));
-
-        let res_m = sk.decrypt(&ct_rotated).decode(Encoding::simd(0));
-        // dbg!(m, res_m);
     }
 }

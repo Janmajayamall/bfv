@@ -51,11 +51,17 @@ impl Substitution {
             .collect_vec()
             .into_boxed_slice();
 
+        let bit_rev = (0..degree)
+            .into_iter()
+            .map(|i| i.reverse_bits() >> (degree.leading_zeros() + 1))
+            .collect_vec()
+            .into_boxed_slice();
+
         Substitution {
             exponent,
             power_bitrev,
             degree,
-            bit_rev: todo!(),
+            bit_rev,
         }
     }
 }
