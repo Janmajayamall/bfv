@@ -1,15 +1,17 @@
-pub mod evaluator;
-pub mod galois_key;
-pub mod key_switching_key;
-pub mod modulus;
-pub mod nb_theory;
-pub mod parameters;
-pub mod plaintext;
-pub mod poly;
-pub mod relinearization_key;
-pub mod secret_key;
-pub mod utils;
+mod evaluation_key;
+mod evaluator;
+mod galois_key;
+mod key_switching_key;
+mod modulus;
+mod nb_theory;
+mod parameters;
+mod plaintext;
+mod poly;
+mod relinearization_key;
+mod secret_key;
+mod utils;
 
+pub use evaluation_key::*;
 pub use evaluator::*;
 pub use galois_key::*;
 pub use key_switching_key::*;

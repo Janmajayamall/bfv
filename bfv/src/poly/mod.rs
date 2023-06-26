@@ -61,6 +61,13 @@ pub struct Poly {
 }
 
 impl Poly {
+    pub fn new(coefficients: Array2<u64>, representation: Representation) -> Poly {
+        Poly {
+            coefficients,
+            representation,
+        }
+    }
+
     pub fn placeholder() -> Poly {
         Poly {
             coefficients: Array2::default((0, 0)),

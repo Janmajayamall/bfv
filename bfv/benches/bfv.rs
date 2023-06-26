@@ -1,8 +1,6 @@
 use bfv::{
-    parameters::BfvParameters,
-    plaintext::{Encoding, Plaintext},
-    secret_key::SecretKey,
-    Evaluator, PolyType, RelinearizationKey,
+    BfvParameters, Encoding, EvaluationKey, Evaluator, Plaintext, PolyType, RelinearizationKey,
+    SecretKey,
 };
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use itertools::Itertools;
@@ -53,14 +51,12 @@ fn bench_bfv(c: &mut Criterion) {
             );
 
             let c0_c1 = evaluator.mul(&c0, &c1);
-            let rlk_lvl0 = RelinearizationKey::new(evaluator.params(), &sk, 0, &mut rng);
-            let mut rlks = HashMap::new();
-            rlks.insert(0, rlk_lvl0);
+            let ek = EvaluationKey::new(evaluator.params(), &sk, &[0], &[0], &[0], &mut rng);
             group.bench_function(
                 BenchmarkId::new("relinearize", format!("n={degree}/logq={logq}")),
                 |b| {
                     b.iter(|| {
-                        let _ = evaluator.relinearize(&c0_c1, &rlks);
+                        let _ = evaluator.relinearize(&c0_c1, &ek);
                     });
                 },
             );

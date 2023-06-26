@@ -52,6 +52,10 @@ where
     pub fn moduli_count(&self) -> usize {
         self.moduli_count
     }
+
+    pub fn degree(&self) -> usize {
+        self.degree
+    }
 }
 
 impl<T> PolyContext<'_, T>
@@ -770,7 +774,7 @@ where
         p
     }
 
-    /// Subtract self from a
+    /// p0 = p1 - p0;
     pub fn sub_reversed_inplace(&self, p0: &mut Poly, p1: &Poly) {
         debug_assert!(p0.representation == p1.representation);
         izip!(

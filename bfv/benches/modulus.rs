@@ -1,4 +1,4 @@
-use bfv::modulus::Modulus;
+use bfv::Modulus;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use itertools::Itertools;
 use rand::{distributions::Uniform, thread_rng, Rng};

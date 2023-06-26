@@ -60,7 +60,7 @@ impl SecretKey {
         let ctx = params.poly_ctx(&PolyType::Q, encoding.level);
         let mut sk_poly = self.to_poly(&ctx);
 
-        let m = pt.to_poly(params);
+        let m = pt.to_poly(params, Representation::Evaluation);
         let mut a = ctx.random(Representation::Evaluation, rng);
 
         // sk*a
@@ -131,7 +131,8 @@ impl SecretKey {
         let m = self
             .decrypt(ct, params)
             .decode(Encoding::simd(ct.level), params);
-        let scaled_m = Plaintext::encode(&m, &params, Encoding::simd(ct.level)).to_poly(&params);
+        let scaled_m = Plaintext::encode(&m, &params, Encoding::simd(ct.level))
+            .to_poly(&params, Representation::Evaluation);
 
         let ctx = params.poly_ctx(&ct.poly_type, ct.level);
 

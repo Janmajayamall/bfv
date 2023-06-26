@@ -1,4 +1,4 @@
-use bfv::{utils::rot_to_galois_element, *};
+use bfv::{rot_to_galois_element, *};
 use fhe_math::zq::ntt::NttOperator;
 use itertools::{izip, Itertools};
 use ndarray::Array2;
@@ -97,9 +97,7 @@ fn ciphertext_mul() {
 
     // gen keys
     let sk = SecretKey::random(params.degree, &mut rng);
-    let rlk = RelinearizationKey::new(&params, &sk, 0, &mut rng);
-    let mut rlks = HashMap::new();
-    rlks.insert(0, rlk);
+    let ek = EvaluationKey::new(&params, &sk, &[0], &[], &[], &mut rng);
 
     let mut m0 = params
         .plaintext_modulus_op
@@ -122,7 +120,7 @@ fn ciphertext_mul() {
 
     // relin
     for _ in 0..1000 {
-        evaluator.relinearize(&ct0_ct1, &rlks);
+        evaluator.relinearize(&ct0_ct1, &ek);
     }
 }
 
@@ -155,16 +153,7 @@ fn ciphertext_rotate() {
 
     // gen keys
     let sk = SecretKey::random(params.degree, &mut rng);
-
-    let rtg = GaloisKey::new(
-        rot_to_galois_element(1, params.degree),
-        &params,
-        0,
-        &sk,
-        &mut rng,
-    );
-    let mut rtgs = HashMap::new();
-    rtgs.insert(1, rtg);
+    let ek = EvaluationKey::new(&params, &sk, &[], &[0], &[0], &mut rng);
 
     let m0 = params
         .plaintext_modulus_op
@@ -175,7 +164,7 @@ fn ciphertext_rotate() {
     let ct0 = evaluator.encrypt(&sk, &pt0, &mut rng);
 
     for _ in 0..1000 {
-        let _ = evaluator.rotate(&ct0, 1, &rtgs);
+        let _ = evaluator.rotate(&ct0, 1, &ek);
     }
 }
 

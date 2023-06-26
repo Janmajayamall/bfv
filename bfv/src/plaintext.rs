@@ -1,9 +1,9 @@
 use traits::Ntt;
 
 use crate::modulus::Modulus;
-use crate::parameters::{BfvParameters, PolyType};
 use crate::poly::{Poly, Representation};
 use crate::Ciphertext;
+use crate::{BfvParameters, PolyType};
 use std::ops::SubAssign;
 use std::sync::Arc;
 
@@ -48,7 +48,7 @@ impl Plaintext {
     /// Encodes a given message `m` to plaintext using given `encoding`
     ///
     /// Panics if `m` values length is greater than polynomial degree
-    pub fn encode<T: Ntt>(m: &[u64], params: &BfvParameters<T>, encoding: Encoding) -> Plaintext {
+    pub fn encode(m: &[u64], params: &BfvParameters, encoding: Encoding) -> Plaintext {
         assert!(m.len() <= params.degree);
 
         let mut m1 = vec![0u64; params.degree];
@@ -79,7 +79,7 @@ impl Plaintext {
         }
     }
 
-    pub fn decode<T: Ntt>(&self, encoding: Encoding, params: &BfvParameters<T>) -> Vec<u64> {
+    pub fn decode(&self, encoding: Encoding, params: &BfvParameters) -> Vec<u64> {
         assert!(self.encoding.is_none());
 
         let mut m1 = self.m.clone();
@@ -102,7 +102,7 @@ impl Plaintext {
     /// Returns message polynomial `m` scaled by Q/t
     ///
     /// Panics if encoding is not specified
-    pub fn to_poly<T: Ntt>(&self, params: &BfvParameters<T>) -> Poly {
+    pub fn to_poly(&self, params: &BfvParameters, representation: Representation) -> Poly {
         match &self.encoding {
             Some(encoding) => {
                 let modt = &params.plaintext_modulus_op;
@@ -120,6 +120,11 @@ impl Plaintext {
                 // to `Evaluation` anyways.
                 ctx.change_representation(&mut m_poly, Representation::Evaluation);
                 ctx.mul_assign(&mut m_poly, &params.neg_t_inv_modql[encoding.level]);
+
+                if representation != Representation::Evaluation {
+                    ctx.change_representation(&mut m_poly, representation);
+                }
+
                 m_poly
             }
             None => {

@@ -1,5 +1,5 @@
 use crate::relinearization_key::RelinearizationKey;
-use crate::{BfvParameters, PolyType};
+use crate::{BfvParameters, EvaluationKey, PolyType};
 use crate::{Encoding, GaloisKey, Plaintext, SecretKey};
 use crate::{Poly, Representation};
 use itertools::{izip, Itertools};
@@ -13,8 +13,26 @@ pub struct Ciphertext {
     pub level: usize,
 }
 
+impl Ciphertext {
+    pub fn new(c: Vec<Poly>, poly_type: PolyType, level: usize) -> Ciphertext {
+        Ciphertext {
+            c,
+            poly_type,
+            level,
+        }
+    }
+
+    pub fn c_ref_mut(&mut self) -> &mut [Poly] {
+        &mut self.c
+    }
+
+    pub fn c_ref(&self) -> &[Poly] {
+        &self.c
+    }
+}
+
 pub struct Evaluator {
-    pub params: BfvParameters,
+    pub(crate) params: BfvParameters,
 }
 
 impl Evaluator {
@@ -24,6 +42,13 @@ impl Evaluator {
 
     pub fn params(&self) -> &BfvParameters {
         &self.params
+    }
+
+    pub fn ciphertext_change_representation(&self, c0: &mut Ciphertext, to: Representation) {
+        let ctx = self.params.poly_ctx(&c0.poly_type, c0.level);
+        c0.c.iter_mut().for_each(|p| {
+            ctx.change_representation(p, to.clone());
+        });
     }
 
     pub fn mul(&self, lhs: &Ciphertext, rhs: &Ciphertext) -> Ciphertext {
@@ -170,23 +195,16 @@ impl Evaluator {
         }
     }
 
-    pub fn relinearize(
-        &self,
-        c0: &Ciphertext,
-        rlks: &HashMap<usize, RelinearizationKey>,
-    ) -> Ciphertext {
-        rlks.get(&c0.level)
+    pub fn relinearize(&self, c0: &Ciphertext, ek: &EvaluationKey) -> Ciphertext {
+        ek.rlks
+            .get(&c0.level)
             .expect("Rlk missing!")
             .relinearize(&c0, &self.params)
     }
 
-    pub fn rotate(
-        &self,
-        c0: &Ciphertext,
-        rotate_by: isize,
-        rtgs: &HashMap<isize, GaloisKey>,
-    ) -> Ciphertext {
-        rtgs.get(&rotate_by)
+    pub fn rotate(&self, c0: &Ciphertext, rotate_by: isize, ek: &EvaluationKey) -> Ciphertext {
+        ek.rtgs
+            .get(&(rotate_by, c0.level))
             .expect("Rtg missing!")
             .rotate(&c0, &self.params)
     }
@@ -237,6 +255,14 @@ impl Evaluator {
         }
     }
 
+    /// c0 += c1 * poly
+    pub fn fma_poly(&self, c0: &mut Ciphertext, c1: &Ciphertext, poly: &Poly) {
+        let ctx = self.params.poly_ctx(&c0.poly_type, c0.level);
+        izip!(c0.c.iter_mut(), c1.c.iter()).for_each(|(p0, p1)| {
+            ctx.add_assign(p0, &ctx.mul(p1, poly));
+        });
+    }
+
     pub fn mul_poly_assign(&self, c0: &mut Ciphertext, poly: &Poly) {
         let ctx = self.params.poly_ctx(&c0.poly_type, c0.level);
         c0.c.iter_mut().for_each(|p0| ctx.mul_assign(p0, poly));
@@ -250,6 +276,13 @@ impl Evaluator {
             poly_type: c0.poly_type.clone(),
             level: c0.level,
         }
+    }
+
+    /// c0 = poly - c0
+    pub fn sub_ciphertext_from_poly_inplace(&self, c0: &mut Ciphertext, poly: &Poly) {
+        let ctx = self.params.poly_ctx(&c0.poly_type, c0.level);
+        ctx.sub_reversed_inplace(&mut c0.c[0], &poly);
+        ctx.neg_assign(&mut c0.c[1]);
     }
 
     pub fn plaintext_encode(&self, m: &[u64], encoding: Encoding) -> Plaintext {
@@ -313,9 +346,7 @@ mod tests {
 
         // gen keys
         let sk = SecretKey::random(params.degree, &mut rng);
-        let rlk = RelinearizationKey::new(&params, &sk, 0, &mut rng);
-        let mut rlks = HashMap::new();
-        rlks.insert(0, rlk);
+        let ek = EvaluationKey::new(&params, &sk, &[0], &[], &[], &mut rng);
 
         let mut m0 = params
             .plaintext_modulus_op
@@ -345,7 +376,7 @@ mod tests {
         assert_eq!(&res_m, &m0);
 
         // relinearize
-        let ct01_relin = evaluator.relinearize(&ct01, &rlks);
+        let ct01_relin = evaluator.relinearize(&ct01, &ek);
         println!(
             "Noise after Relinearizartion: {}",
             evaluator.measure_noise(&sk, &ct01_relin,)
@@ -364,16 +395,7 @@ mod tests {
 
         // gen keys
         let sk = SecretKey::random(params.degree, &mut rng);
-
-        let rtg = GaloisKey::new(
-            rot_to_galois_element(1, params.degree),
-            &params,
-            0,
-            &sk,
-            &mut rng,
-        );
-        let mut rtgs = HashMap::new();
-        rtgs.insert(1, rtg);
+        let ek = EvaluationKey::new(&params, &sk, &[], &[0], &[1], &mut rng);
 
         let m0 = params
             .plaintext_modulus_op
@@ -383,7 +405,7 @@ mod tests {
         let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
         let ct0 = evaluator.encrypt(&sk, &pt0, &mut rng);
 
-        let ct_rotated = evaluator.rotate(&ct0, 1, &rtgs);
+        let ct_rotated = evaluator.rotate(&ct0, 1, &ek);
         println!("Noise: {}", evaluator.measure_noise(&sk, &ct_rotated,));
 
         // decrypt ct01
