@@ -116,10 +116,7 @@ where
         } else if poly.representation == Representation::Coefficient {
             if to == Representation::Evaluation {
                 izip!(poly.coefficients.outer_iter_mut(), self.iter_ntt_ops()).for_each(
-                    |(mut coefficients, ntt)| {
-                        // TODO: switch between native and hexl
-                        ntt.forward(coefficients.as_slice_mut().unwrap())
-                    },
+                    |(mut coefficients, ntt)| ntt.forward(coefficients.as_slice_mut().unwrap()),
                 );
                 poly.representation = Representation::Evaluation;
             } else {
@@ -954,7 +951,7 @@ where
 
 mod tests {
     use super::*;
-    use crate::{nb_theory::generate_primes_vec, parameters::BfvParameters, PolyType};
+    use crate::{nb_theory::generate_primes_vec, BfvParameters, PolyType};
     use fhe_math::zq::ntt::NttOperator;
     use num_bigint::{BigInt, ToBigInt};
     use num_bigint_dig::UniformBigUint;

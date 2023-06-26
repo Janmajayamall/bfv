@@ -1,9 +1,6 @@
 use bfv::{
-    nb_theory::generate_primes_vec,
-    parameters::BfvParameters,
-    poly::{Poly, PolyContext, Representation},
-    utils::mod_inverse_biguint_u64,
-    HybridKeySwitchingKey, PolyType, SecretKey,
+    mod_inverse_biguint_u64, BfvParameters, HybridKeySwitchingKey, PolyContext, PolyType,
+    Representation, SecretKey,
 };
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use fhe_math::zq::ntt::NttOperator;
@@ -202,7 +199,7 @@ fn bench_poly(c: &mut Criterion) {
             let specialp_poly = specialp_ctx.random(Representation::Coefficient, &mut rng);
             group.bench_function(BenchmarkId::new("approx_switch_crt_basis", ""), |b| {
                 b.iter(|| {
-                    PolyContext::<NttOperator>::approx_switch_crt_basis(
+                    PolyContext::approx_switch_crt_basis(
                         &specialp_poly.coefficients.view(),
                         specialp_ctx.moduli_ops(),
                         degree,

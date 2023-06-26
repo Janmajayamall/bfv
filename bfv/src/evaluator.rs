@@ -1,12 +1,10 @@
-use crate::parameters::{BfvParameters, PolyType};
-use crate::poly::{Poly, Representation};
 use crate::relinearization_key::RelinearizationKey;
-use crate::{warn, Encoding, GaloisKey, Plaintext, SecretKey};
+use crate::{BfvParameters, PolyType};
+use crate::{Encoding, GaloisKey, Plaintext, SecretKey};
+use crate::{Poly, Representation};
 use itertools::{izip, Itertools};
 use rand::{CryptoRng, RngCore};
 use std::collections::HashMap;
-use std::sync::Arc;
-use traits::Ntt;
 
 #[derive(Debug, Clone)]
 pub struct Ciphertext {
@@ -15,19 +13,16 @@ pub struct Ciphertext {
     pub level: usize,
 }
 
-pub struct Evaluator<T: Ntt> {
-    pub params: BfvParameters<T>,
+pub struct Evaluator {
+    pub params: BfvParameters,
 }
 
-impl<T> Evaluator<T>
-where
-    T: Ntt,
-{
-    pub fn new(params: BfvParameters<T>) -> Evaluator<T> {
+impl Evaluator {
+    pub fn new(params: BfvParameters) -> Evaluator {
         Evaluator { params }
     }
 
-    pub fn params(&self) -> &BfvParameters<T> {
+    pub fn params(&self) -> &BfvParameters {
         &self.params
     }
 

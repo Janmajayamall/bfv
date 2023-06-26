@@ -1,19 +1,5 @@
-use crate::modulus::Modulus;
-use crypto_bigint::U192;
-use fhe_util::sample_vec_cbd;
-use itertools::{izip, Itertools};
-use ndarray::{azip, s, Array2, ArrayView2, Axis, IntoNdProducer};
-use num_bigint::BigUint;
-use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
-use num_traits::{identities::One, ToPrimitive, Zero};
-use rand::{CryptoRng, RngCore};
-use seq_macro::seq;
-use std::{
-    mem::{self, MaybeUninit},
-    ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
-    sync::Arc,
-};
-
+use itertools::Itertools;
+use ndarray::Array2;
 pub mod poly_context;
 
 pub use poly_context::PolyContext;
@@ -77,7 +63,7 @@ pub struct Poly {
 impl Poly {
     pub fn placeholder() -> Poly {
         Poly {
-            coefficients: Array2::zeros((0, 0)),
+            coefficients: Array2::default((0, 0)),
             representation: Representation::Unknown,
         }
     }

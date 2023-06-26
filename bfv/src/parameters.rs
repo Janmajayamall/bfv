@@ -1,11 +1,10 @@
 use crate::modulus::Modulus;
 use crate::nb_theory::generate_primes_vec;
-use crate::poly::{poly_context::PolyContext, Poly, Representation};
-use crate::utils::{mod_inverse_biguint, mod_inverse_biguint_u64};
-use itertools::{izip, Itertools};
-use ndarray::{Array2, Array3};
+use crate::{mod_inverse_biguint, mod_inverse_biguint_u64};
+use crate::{poly::poly_context::PolyContext, Poly, Representation};
+use itertools::Itertools;
+use ndarray::Array2;
 use num_bigint::BigUint;
-use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{One, Pow, ToPrimitive};
 use std::vec;
 use traits::Ntt;
@@ -640,19 +639,11 @@ where
             },
         }
     }
-}
 
-#[cfg(not(feature = "hexl"))]
-use fhe_math::zq::ntt::NttOperator;
-#[cfg(feature = "hexl")]
-use hexl_rs::NttOperator;
-impl BfvParameters<NttOperator> {
-    pub fn default(moduli_count: usize, polynomial_degree: usize) -> BfvParameters<NttOperator> {
+    pub fn default(moduli_count: usize, polynomial_degree: usize) -> BfvParameters<T> {
         BfvParameters::new(&vec![50; moduli_count], 65537, polynomial_degree)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-}
+mod tests {}

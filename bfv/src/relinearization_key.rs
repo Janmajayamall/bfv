@@ -1,10 +1,7 @@
 use crate::{
-    BfvParameters, Ciphertext, HybridKeySwitchingKey, Poly, PolyContext, PolyType, Representation,
-    SecretKey,
+    BfvParameters, Ciphertext, HybridKeySwitchingKey, PolyType, Representation, SecretKey,
 };
 use rand::{CryptoRng, RngCore};
-use std::sync::Arc;
-use traits::Ntt;
 
 pub struct RelinearizationKey {
     ksk: HybridKeySwitchingKey,
@@ -12,8 +9,8 @@ pub struct RelinearizationKey {
 }
 
 impl RelinearizationKey {
-    pub fn new<T: Ntt, R: CryptoRng + RngCore>(
-        params: &BfvParameters<T>,
+    pub fn new<R: CryptoRng + RngCore>(
+        params: &BfvParameters,
         sk: &SecretKey,
         level: usize,
         rng: &mut R,
@@ -44,7 +41,7 @@ impl RelinearizationKey {
         RelinearizationKey { ksk, level }
     }
 
-    pub fn relinearize<T: Ntt>(&self, ct: &Ciphertext, params: &BfvParameters<T>) -> Ciphertext {
+    pub fn relinearize(&self, ct: &Ciphertext, params: &BfvParameters) -> Ciphertext {
         assert!(ct.c.len() == 3); // otherwise invalid relinerization
         assert!(ct.c[0].representation == Representation::Coefficient);
         assert!(ct.level == self.level);

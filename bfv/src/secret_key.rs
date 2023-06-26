@@ -1,14 +1,10 @@
 use crate::evaluator::Ciphertext;
-use crate::parameters::{BfvParameters, PolyType};
 use crate::plaintext::{Encoding, Plaintext};
-use crate::poly::{Poly, Representation};
-use crate::PolyContext;
+use crate::{BfvParameters, PolyType};
+use crate::{Poly, PolyContext, Representation};
 use itertools::Itertools;
-use num_bigint::BigUint;
 use rand::distributions::{Distribution, Uniform};
 use rand::{CryptoRng, RngCore};
-use std::sync::Arc;
-use traits::Ntt;
 
 pub struct SecretKey {
     pub(crate) coefficients: Box<[i64]>,
@@ -43,16 +39,16 @@ impl SecretKey {
     }
 
     /// Returns secret key polynomial for polynomial context at given level in Evaluation form
-    fn to_poly<T: Ntt>(&self, ctx: &PolyContext<'_, T>) -> Poly {
+    fn to_poly(&self, ctx: &PolyContext<'_>) -> Poly {
         let mut p = ctx.try_convert_from_i64_small(&self.coefficients, Representation::Coefficient);
         ctx.change_representation(&mut p, Representation::Evaluation);
         p
     }
 
     /// Encrypts given plaintext with the secret key
-    pub fn encrypt<T: Ntt, R: CryptoRng + RngCore>(
+    pub fn encrypt<R: CryptoRng + RngCore>(
         &self,
-        params: &BfvParameters<T>,
+        params: &BfvParameters,
         pt: &Plaintext,
         rng: &mut R,
     ) -> Ciphertext {
@@ -88,7 +84,7 @@ impl SecretKey {
         }
     }
 
-    pub fn decrypt<T: Ntt>(&self, ct: &Ciphertext, params: &BfvParameters<T>) -> Plaintext {
+    pub fn decrypt(&self, ct: &Ciphertext, params: &BfvParameters) -> Plaintext {
         // Panic on empty ciphertext
         assert!(ct.c.len() != 0);
         assert!(ct.poly_type == PolyType::Q);
@@ -129,7 +125,7 @@ impl SecretKey {
         }
     }
 
-    pub fn measure_noise<T: Ntt>(&self, ct: &Ciphertext, params: &BfvParameters<T>) -> u64 {
+    pub fn measure_noise(&self, ct: &Ciphertext, params: &BfvParameters) -> u64 {
         // TODO: replace default simd with encoding used for ciphertext. This will require
         // adding encoding info to ciphertext
         let m = self

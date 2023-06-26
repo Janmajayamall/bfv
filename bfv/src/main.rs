@@ -1,30 +1,55 @@
-use bfv::*;
+use bfv::{utils::rot_to_galois_element, *};
 use fhe_math::zq::ntt::NttOperator;
 use itertools::{izip, Itertools};
 use ndarray::Array2;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{FromPrimitive, ToPrimitive};
 use rand::{distributions::Uniform, thread_rng, Rng};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-// fn switch_crt_basis() {
-//     let mut rng = thread_rng();
-//     let bfv_params = BfvParameters::default(15, 1 << 15);
-//     let q_context = bfv_params.ciphertext_poly_contexts[0].clone();
-//     let p_context = bfv_params.extension_poly_contexts[0].clone();
-//     let mut q_poly = Poly::random(&q_context, &Representation::Coefficient, &mut rng);
+fn switch_crt_basis() {
+    let mut rng = thread_rng();
+    let params = BfvParameters::default(15, 1 << 15);
 
-//     for _ in 0..10000 {
-//         let _ = q_poly.switch_crt_basis(
-//             &p_context,
-//             &bfv_params.ql_hat_modp[0],
-//             &bfv_params.ql_hat_inv_modql[0],
-//             &bfv_params.ql_hat_inv_modql_shoup[0],
-//             &bfv_params.ql_inv[0],
-//             &bfv_params.alphal_modp[0],
-//         );
-//     }
-// }
+    let q_context = params.poly_ctx(&PolyType::Q, 0);
+    let p_context = params.poly_ctx(&PolyType::P, 0);
+    let mut q_poly = q_context.random(Representation::Coefficient, &mut rng);
+
+    for _ in 0..10000 {
+        let _ = q_context.switch_crt_basis(
+            &q_poly,
+            &p_context,
+            &params.ql_hat_modpl[0],
+            &params.ql_hat_inv_modql[0],
+            &params.ql_hat_inv_modql_shoup[0],
+            &params.ql_inv[0],
+            &params.alphal_modpl[0],
+        );
+    }
+}
+
+fn scale_and_round() {
+    let mut rng = thread_rng();
+    let params = BfvParameters::default(15, 1 << 15);
+
+    let q_context = params.poly_ctx(&PolyType::Q, 0);
+    let p_context = params.poly_ctx(&PolyType::P, 0);
+    let pq_context = params.poly_ctx(&PolyType::PQ, 0);
+
+    let pq_poly = pq_context.random(Representation::Coefficient, &mut rng);
+
+    for _ in 0..10000 {
+        let _ = pq_context.scale_and_round(
+            &pq_poly,
+            &q_context,
+            &p_context,
+            &q_context,
+            &params.tql_pl_hat_inv_modpl_divpl_modql[0],
+            &params.tql_pl_hat_inv_modpl_divpl_frachi[0],
+            &params.tql_pl_hat_inv_modpl_divpl_fraclo[0],
+        );
+    }
+}
 
 // fn fast_conv_p_over_q() {
 //     let mut rng = thread_rng();
@@ -66,30 +91,93 @@ use std::sync::Arc;
 //     }
 // }
 
-// fn ciphertext_mul() {
-//     let mut rng = thread_rng();
-//     let params = Arc::new(BfvParameters::default(15, 1 << 15));
-//     let sk = SecretKey::random(&params, &mut rng);
+fn ciphertext_mul() {
+    let mut rng = thread_rng();
+    let params = BfvParameters::default(15, 1 << 15);
 
-//     let m1 = rng
-//         .clone()
-//         .sample_iter(Uniform::new(0, params.plaintext_modulus))
-//         .take(params.polynomial_degree)
-//         .collect_vec();
-//     let m2 = rng
-//         .clone()
-//         .sample_iter(Uniform::new(0, params.plaintext_modulus))
-//         .take(params.polynomial_degree)
-//         .collect_vec();
-//     let pt1 = Plaintext::encode(&m1, &params, Encoding::simd(0));
-//     let pt2 = Plaintext::encode(&m2, &params, Encoding::simd(0));
-//     let ct1 = sk.encrypt(&pt1, &mut rng);
-//     let ct2 = sk.encrypt(&pt2, &mut rng);
+    // gen keys
+    let sk = SecretKey::random(params.degree, &mut rng);
+    let rlk = RelinearizationKey::new(&params, &sk, 0, &mut rng);
+    let mut rlks = HashMap::new();
+    rlks.insert(0, rlk);
 
-//     for _ in 0..1000 {
-//         let _ = ct1.multiply1(&ct2);
-//     }
-// }
+    let mut m0 = params
+        .plaintext_modulus_op
+        .random_vec(params.degree, &mut rng);
+    let m1 = params
+        .plaintext_modulus_op
+        .random_vec(params.degree, &mut rng);
+
+    let evaluator = Evaluator::new(params);
+    let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
+    let pt1 = evaluator.plaintext_encode(&m1, Encoding::default());
+    let ct0 = evaluator.encrypt(&sk, &pt0, &mut rng);
+    let ct1 = evaluator.encrypt(&sk, &pt1, &mut rng);
+    let ct0_ct1 = evaluator.mul(&ct0, &ct1);
+
+    // ciphertext mul
+    // for _ in 0..1000 {
+    //     evaluator.mul(&ct0, &ct1);
+    // }
+
+    // relin
+    for _ in 0..1000 {
+        evaluator.relinearize(&ct0_ct1, &rlks);
+    }
+}
+
+fn ciphertext_add() {
+    let mut rng = thread_rng();
+    let params = BfvParameters::default(15, 1 << 15);
+    let sk = SecretKey::random(params.degree, &mut rng);
+
+    let mut m0 = params
+        .plaintext_modulus_op
+        .random_vec(params.degree, &mut rng);
+    let m1 = params
+        .plaintext_modulus_op
+        .random_vec(params.degree, &mut rng);
+
+    let evaluator = Evaluator::new(params);
+    let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
+    let pt1 = evaluator.plaintext_encode(&m1, Encoding::default());
+    let ct0 = evaluator.encrypt(&sk, &pt0, &mut rng);
+    let ct1 = evaluator.encrypt(&sk, &pt1, &mut rng);
+
+    for _ in 0..1000 {
+        let _ = evaluator.add(&ct0, &ct1);
+    }
+}
+
+fn ciphertext_rotate() {
+    let mut rng = thread_rng();
+    let params = BfvParameters::default(15, 1 << 15);
+
+    // gen keys
+    let sk = SecretKey::random(params.degree, &mut rng);
+
+    let rtg = GaloisKey::new(
+        rot_to_galois_element(1, params.degree),
+        &params,
+        0,
+        &sk,
+        &mut rng,
+    );
+    let mut rtgs = HashMap::new();
+    rtgs.insert(1, rtg);
+
+    let m0 = params
+        .plaintext_modulus_op
+        .random_vec(params.degree, &mut rng);
+
+    let evaluator = Evaluator::new(params);
+    let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
+    let ct0 = evaluator.encrypt(&sk, &pt0, &mut rng);
+
+    for _ in 0..1000 {
+        let _ = evaluator.rotate(&ct0, 1, &rtgs);
+    }
+}
 
 // fn rotations() {
 //     let mut rng = thread_rng();
@@ -306,6 +394,8 @@ fn main() {
     // scale_and_round();
     // fast_conv_p_over_q();
     // ciphertext_mul();
+    // ciphertext_add();
+    ciphertext_rotate();
     // key_switch();
     // rotations();
     // approx_switch_crt_basis()

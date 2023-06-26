@@ -2,7 +2,6 @@ use crate::{
     BfvParameters, Ciphertext, HybridKeySwitchingKey, Modulus, Poly, PolyContext, PolyType,
     Representation, SecretKey, Substitution,
 };
-
 use rand::{CryptoRng, RngCore};
 use traits::Ntt;
 
@@ -13,9 +12,9 @@ pub struct GaloisKey {
 }
 
 impl GaloisKey {
-    pub fn new<T: Ntt, R: CryptoRng + RngCore>(
+    pub fn new<R: CryptoRng + RngCore>(
         exponent: usize,
-        params: &BfvParameters<T>,
+        params: &BfvParameters,
         level: usize,
         sk: &SecretKey,
         rng: &mut R,
@@ -52,7 +51,7 @@ impl GaloisKey {
         }
     }
 
-    pub fn rotate<T: Ntt>(&self, ct: &Ciphertext, params: &BfvParameters<T>) -> Ciphertext {
+    pub fn rotate(&self, ct: &Ciphertext, params: &BfvParameters) -> Ciphertext {
         assert!(ct.c.len() == 2);
         assert!(ct.level == self.level);
         assert!(ct.poly_type == PolyType::Q);

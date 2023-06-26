@@ -1,24 +1,13 @@
 use crate::modulus::Modulus;
-use crate::utils::{mod_inverse_biguint, mod_inverse_biguint_u64};
-use crate::BfvParameters;
-use crate::{
-    nb_theory::generate_prime,
-    poly::{Poly, PolyContext, Representation},
-    secret_key::SecretKey,
-};
+use crate::{mod_inverse_biguint, mod_inverse_biguint_u64};
+use crate::{secret_key::SecretKey, Poly, PolyContext, Representation};
 use crypto_bigint::rand_core::CryptoRngCore;
-use fhe_math::zq::primes;
 use itertools::{izip, Itertools};
 use ndarray::{azip, s, Array1, Array2, Array3, Axis, IntoNdProducer};
 use num_bigint::{BigUint, ToBigInt};
-use num_bigint_dig::algorithms::mod_inverse;
-use num_bigint_dig::BigUint as BigUintDig;
-use num_bigint_dig::ModInverse;
 use num_traits::{FromPrimitive, One, ToPrimitive};
 use rand::{CryptoRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-use std::sync::Arc;
-use traits::Ntt;
 
 struct BVKeySwitchingKey {
     c0s: Box<[Poly]>,
@@ -27,10 +16,10 @@ struct BVKeySwitchingKey {
 }
 
 impl BVKeySwitchingKey {
-    pub fn new<T: Ntt, R: CryptoRng + CryptoRngCore>(
+    pub fn new<R: CryptoRng + CryptoRngCore>(
         poly: &Poly,
         sk: &SecretKey,
-        ksk_ctx: &PolyContext<'_, T>,
+        ksk_ctx: &PolyContext<'_>,
         rng: &mut R,
     ) -> BVKeySwitchingKey {
         // check that ciphertext context has more than on moduli, otherwise key switching does not makes sense
@@ -49,7 +38,7 @@ impl BVKeySwitchingKey {
         }
     }
 
-    pub fn switch<T: Ntt>(&self, poly: &Poly, ksk_ctx: &PolyContext<'_, T>) -> (Poly, Poly) {
+    pub fn switch(&self, poly: &Poly, ksk_ctx: &PolyContext<'_>) -> (Poly, Poly) {
         // TODO: check that poly matches ksk_ctx
         // And ksk_ctx matches the key
         debug_assert!(poly.representation == Representation::Coefficient);
@@ -82,8 +71,8 @@ impl BVKeySwitchingKey {
         (c0_out, c1_out)
     }
 
-    pub fn generate_c1<T: Ntt>(
-        ksk_ctx: &PolyContext<'_, T>,
+    pub fn generate_c1(
+        ksk_ctx: &PolyContext<'_>,
         seed: <ChaCha8Rng as SeedableRng>::Seed,
     ) -> Vec<Poly> {
         let mut rng = ChaCha8Rng::from_seed(seed);
@@ -93,8 +82,8 @@ impl BVKeySwitchingKey {
             .collect_vec()
     }
 
-    pub fn generate_c0<T: Ntt, R: CryptoRng + CryptoRngCore>(
-        ksk_ctx: &PolyContext<'_, T>,
+    pub fn generate_c0<R: CryptoRng + CryptoRngCore>(
+        ksk_ctx: &PolyContext<'_>,
         poly: &Poly,
         c1s: &[Poly],
         sk: &SecretKey,
@@ -171,12 +160,12 @@ impl HybridKeySwitchingKey {
     /// implemented here.
     /// Let's say ciphertext ctx = Q' and ksk ctx = Q. The extended ctx should be QP. To speed things
     /// up during `key_switch` operation, we assume Q == Q' because we extend poly from Qj to Q[..i*alpha] + Q[(i+1)*alpha..] + P.
-    pub fn new<T: Ntt, R: CryptoRng + CryptoRngCore>(
+    pub fn new<R: CryptoRng + CryptoRngCore>(
         poly: &Poly,
         sk: &SecretKey,
-        ksk_ctx: &PolyContext<'_, T>,
-        specialp_ctx: &PolyContext<'_, T>,
-        qp_ctx: &PolyContext<'_, T>,
+        ksk_ctx: &PolyContext<'_>,
+        specialp_ctx: &PolyContext<'_>,
+        qp_ctx: &PolyContext<'_>,
         alpha: usize,
         aux_bits: usize,
         rng: &mut R,
@@ -331,12 +320,12 @@ impl HybridKeySwitchingKey {
         }
     }
 
-    pub fn switch<T: Ntt>(
+    pub fn switch(
         &self,
         poly: &Poly,
-        qp_ctx: &PolyContext<'_, T>,
-        ksk_ctx: &PolyContext<'_, T>,
-        specialp_ctx: &PolyContext<'_, T>,
+        qp_ctx: &PolyContext<'_>,
+        ksk_ctx: &PolyContext<'_>,
+        specialp_ctx: &PolyContext<'_>,
     ) -> (Poly, Poly) {
         // TODO: check poly context
         debug_assert!(poly.representation == Representation::Coefficient);
@@ -359,7 +348,7 @@ impl HybridKeySwitchingKey {
             };
             let mut parts_count = qj_coefficients.shape()[0];
 
-            let mut p_whole_coefficients = PolyContext::<T>::approx_switch_crt_basis(
+            let mut p_whole_coefficients = PolyContext::approx_switch_crt_basis(
                 &qj_coefficients,
                 &self.qj_moduli_ops_parts[i],
                 qp_ctx.degree,
@@ -454,9 +443,9 @@ impl HybridKeySwitchingKey {
         (c0_out, c1_out)
     }
 
-    fn generate_c1<T: Ntt>(
+    fn generate_c1(
         count: usize,
-        qp_ctx: &PolyContext<'_, T>,
+        qp_ctx: &PolyContext<'_>,
         seed: <ChaCha8Rng as SeedableRng>::Seed,
     ) -> Vec<Poly> {
         let mut rng = ChaCha8Rng::from_seed(seed);
@@ -466,8 +455,8 @@ impl HybridKeySwitchingKey {
             .collect_vec()
     }
 
-    fn generate_c0<T: Ntt, R: CryptoRng + CryptoRngCore>(
-        qp_ctx: &PolyContext<'_, T>,
+    fn generate_c0<R: CryptoRng + CryptoRngCore>(
+        qp_ctx: &PolyContext<'_>,
         c1s: &[Poly],
         g: &[BigUint],
         poly: &Poly,
