@@ -60,6 +60,16 @@ fn bench_bfv(c: &mut Criterion) {
                     });
                 },
             );
+
+            let ek = EvaluationKey::new(evaluator.params(), &sk, &[0], &[0], &[1], &mut rng);
+            group.bench_function(
+                BenchmarkId::new("rotate", format!("n={degree}/logq={logq}")),
+                |b| {
+                    b.iter(|| {
+                        let _ = evaluator.rotate(&c0, 1, &ek);
+                    });
+                },
+            );
         }
     }
 }
