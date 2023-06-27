@@ -730,7 +730,7 @@ where
                 .unwrap()
                 .backward(p.as_slice_mut().unwrap());
         }
-
+        let lastqi = self.moduli_ops().last().unwrap().modulus();
         izip!(
             coeffs.outer_iter_mut(),
             self.iter_moduli_ops(),
@@ -739,7 +739,9 @@ where
         )
         .for_each(|(mut ceoffs, modqi, nttop, last_qi_modqi)| {
             let mut tmp = p.to_owned();
-            modqi.reduce_vec(tmp.as_slice_mut().unwrap());
+            // FIXME: using `reduce_naive_vec` becuse `reduce_vec` is slower.
+            modqi.reduce_naive_vec(tmp.as_slice_mut().unwrap());
+            // Modulus::switch_modulus(tmp.as_slice_mut().unwrap(), lastqi, modqi.modulus());
 
             if poly.representation == Representation::Evaluation {
                 //TODO can we make this lazy as well?
@@ -871,7 +873,8 @@ where
         izip!(p.coefficients.outer_iter_mut(), self.iter_moduli_ops()).for_each(
             |(mut qi_values, qi)| {
                 let mut xi = values.to_vec();
-                qi.reduce_vec(&mut xi);
+                // FIXME: using `reduce_naive_vec` becuse `reduce_vec` is slower.
+                qi.reduce_naive_vec(&mut xi);
                 qi_values.as_slice_mut().unwrap().copy_from_slice(&xi);
             },
         );

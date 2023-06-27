@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn generate_prime_works() {
-        let prime = generate_prime(50, 1 << 15, 1 << 50);
+        let prime = generate_prime(30, 1 << 15, 1 << 30);
         dbg!(prime);
     }
 }

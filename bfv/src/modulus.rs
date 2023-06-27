@@ -362,9 +362,13 @@ impl Modulus {
     ///
     /// Assumes scalar and all elements in a are smaller than modulus
     pub fn scalar_mul_mod_fast_vec(&self, a: &mut [u64], b: u64) {
+        #[cfg(not(feature = "hexl"))]
         a.iter_mut().for_each(|v| {
             *v = self.mul_mod_fast(*v, b);
         });
+
+        #[cfg(feature = "hexl")]
+        hexl_rs::elwise_mult_scalar_mod(&mut a, b, self.modulus, degree, 1)
     }
 
     pub fn reduce_vec(&self, a: &mut [u64]) {
@@ -439,12 +443,31 @@ impl Modulus {
         };
         let o_half = old_modulus >> 1;
         values.iter_mut().for_each(|a| {
-            if new_modulus > old_modulus && *a > o_half {
-                *a += delta;
-            } else if *a > o_half {
-                *a = (*a - (delta % new_modulus)) % new_modulus
+            if new_modulus > old_modulus {
+                if *a > o_half {
+                    *a += delta;
+                }
             } else {
-                *a = *a % new_modulus
+                if *a > o_half {
+                    *a = (*a - (delta % new_modulus)) % new_modulus;
+                } else {
+                    *a = *a % new_modulus;
+                }
+            }
+        });
+    }
+
+    /// # Panics
+    /// if `new_modulus` < `old_modulus`.
+    ///
+    /// Use `switch_modulus` if you cannot guarantee that new_modulus is greater than or equal to old_modulus
+    pub fn switch_modulus_new_gt_than_old(values: &mut [u64], old_modulus: u64, new_modulus: u64) {
+        assert!(new_modulus >= old_modulus);
+        let delta = new_modulus - old_modulus;
+        let o_half = old_modulus >> 1;
+        values.iter_mut().for_each(|a| {
+            if *a > o_half {
+                *a += delta;
             }
         });
     }
@@ -625,12 +648,16 @@ mod tests {
     #[test]
     fn switch_modulus_works() {
         let mut rng = thread_rng();
-        let prime = generate_prime(60, 16, 1 << 60).unwrap();
-        let prime2 = generate_prime(52, 16, 1 << 52).unwrap();
+
+        let prime = generate_prime(52, 16, 1 << 52).unwrap();
+        let prime2 = generate_prime(60, 16, 1 << 60).unwrap();
 
         let vp = Modulus::new(prime).random_vec(8, &mut rng);
         let mut vp_res = vp.clone();
+        let mut vp_res2 = vp.clone();
         Modulus::switch_modulus(&mut vp_res, prime, prime2);
+        Modulus::switch_modulus_new_gt_than_old(&mut vp_res2, prime, prime2);
+        assert_eq!(&vp_res, &vp_res2);
         assert_eq!(
             vp_res,
             vp.iter()

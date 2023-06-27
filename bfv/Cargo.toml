@@ -19,7 +19,7 @@ crypto-bigint = "0.4.9"
 rand_chacha = "0.3.1"
 seq-macro = "0.3"
 traits = {git = "https://github.com/Janmajayamall/bfv", branch="ntt-trait"}
-hexl-rs = {path = "./../../hexl-rs", optional = true}
+hexl-rs = {git = "https://github.com/Janmajayamall/hexl-rs.git", optional = true}
 
 [dev-dependencies]
 criterion = "0.4"
