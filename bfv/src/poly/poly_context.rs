@@ -730,7 +730,6 @@ where
                 .unwrap()
                 .backward(p.as_slice_mut().unwrap());
         }
-        let lastqi = self.moduli_ops().last().unwrap().modulus();
         izip!(
             coeffs.outer_iter_mut(),
             self.iter_moduli_ops(),
@@ -739,9 +738,7 @@ where
         )
         .for_each(|(mut ceoffs, modqi, nttop, last_qi_modqi)| {
             let mut tmp = p.to_owned();
-            // FIXME: using `reduce_naive_vec` becuse `reduce_vec` is slower.
-            modqi.reduce_naive_vec(tmp.as_slice_mut().unwrap());
-            // Modulus::switch_modulus(tmp.as_slice_mut().unwrap(), lastqi, modqi.modulus());
+            modqi.reduce_vec(tmp.as_slice_mut().unwrap());
 
             if poly.representation == Representation::Evaluation {
                 //TODO can we make this lazy as well?
@@ -873,8 +870,7 @@ where
         izip!(p.coefficients.outer_iter_mut(), self.iter_moduli_ops()).for_each(
             |(mut qi_values, qi)| {
                 let mut xi = values.to_vec();
-                // FIXME: using `reduce_naive_vec` becuse `reduce_vec` is slower.
-                qi.reduce_naive_vec(&mut xi);
+                qi.reduce_vec(&mut xi);
                 qi_values.as_slice_mut().unwrap().copy_from_slice(&xi);
             },
         );
@@ -959,11 +955,11 @@ where
 mod tests {
     use super::*;
     use crate::{nb_theory::generate_primes_vec, BfvParameters, PolyType};
-    use fhe_math::zq::ntt::NttOperator;
     use num_bigint::{BigInt, ToBigInt};
     use num_bigint_dig::UniformBigUint;
     use num_traits::{FromPrimitive, Zero};
     use rand::{distributions::Uniform, rngs::ThreadRng, thread_rng, Rng};
+    use traits::Ntt;
 
     #[test]
     pub fn test_poly_to_biguint() {
@@ -1287,7 +1283,7 @@ mod tests {
 
         let q_poly = q_context.random(Representation::Coefficient, &mut rng);
         let now = std::time::Instant::now();
-        let p_coefficients = PolyContext::<NttOperator>::approx_switch_crt_basis(
+        let p_coefficients = crate::PolyContext::approx_switch_crt_basis(
             &q_poly.coefficients.view(),
             q_context.moduli_ops(),
             q_context.degree,

@@ -368,9 +368,10 @@ impl Modulus {
         });
 
         #[cfg(feature = "hexl")]
-        hexl_rs::elwise_mult_scalar_mod(&mut a, b, self.modulus, degree, 1)
+        hexl_rs::elwise_mult_scalar_mod(a, b, self.modulus, a.len() as u64, 1)
     }
 
+    // FIXME: reduce_vec performs a lot worse than reduce_naive_vec on macos (not on x86)
     pub fn reduce_vec(&self, a: &mut [u64]) {
         #[cfg(not(feature = "hexl"))]
         a.iter_mut().for_each(|v| {
@@ -442,34 +443,39 @@ impl Modulus {
             new_modulus - old_modulus
         };
         let o_half = old_modulus >> 1;
-        values.iter_mut().for_each(|a| {
-            if new_modulus > old_modulus {
-                if *a > o_half {
-                    *a += delta;
-                }
-            } else {
-                if *a > o_half {
-                    *a = (*a - (delta % new_modulus)) % new_modulus;
-                } else {
-                    *a = *a % new_modulus;
-                }
-            }
-        });
-    }
 
-    /// # Panics
-    /// if `new_modulus` < `old_modulus`.
-    ///
-    /// Use `switch_modulus` if you cannot guarantee that new_modulus is greater than or equal to old_modulus
-    pub fn switch_modulus_new_gt_than_old(values: &mut [u64], old_modulus: u64, new_modulus: u64) {
-        assert!(new_modulus >= old_modulus);
-        let delta = new_modulus - old_modulus;
-        let o_half = old_modulus >> 1;
-        values.iter_mut().for_each(|a| {
-            if *a > o_half {
-                *a += delta;
+        #[cfg(not(feature = "hexl"))]
+        {
+            values.iter_mut().for_each(|a| {
+                if new_modulus > old_modulus {
+                    if *a > o_half {
+                        *a += delta;
+                    }
+                } else {
+                    if *a > o_half {
+                        *a = (*a - (delta % new_modulus)) % new_modulus;
+                    } else {
+                        *a = *a % new_modulus;
+                    }
+                }
+            });
+        }
+
+        #[cfg(feature = "hexl")]
+        {
+            if new_modulus > old_modulus {
+                hexl_rs::elwise_cmp_add(values, o_half, delta, 6, values.len() as u64);
+            } else {
+                hexl_rs::elwise_cmp_sub_mod(
+                    values,
+                    o_half,
+                    delta % new_modulus,
+                    6,
+                    new_modulus,
+                    values.len() as u64,
+                );
             }
-        });
+        }
     }
 }
 
@@ -649,15 +655,13 @@ mod tests {
     fn switch_modulus_works() {
         let mut rng = thread_rng();
 
-        let prime = generate_prime(52, 16, 1 << 52).unwrap();
-        let prime2 = generate_prime(60, 16, 1 << 60).unwrap();
+        let prime = generate_prime(60, 16, 1 << 60).unwrap();
+        let prime2 = generate_prime(52, 16, 1 << 52).unwrap();
 
         let vp = Modulus::new(prime).random_vec(8, &mut rng);
         let mut vp_res = vp.clone();
         let mut vp_res2 = vp.clone();
         Modulus::switch_modulus(&mut vp_res, prime, prime2);
-        Modulus::switch_modulus_new_gt_than_old(&mut vp_res2, prime, prime2);
-        assert_eq!(&vp_res, &vp_res2);
         assert_eq!(
             vp_res,
             vp.iter()

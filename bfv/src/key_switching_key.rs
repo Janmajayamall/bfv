@@ -8,7 +8,7 @@ use num_bigint::{BigUint, ToBigInt};
 use num_traits::{FromPrimitive, One, ToPrimitive};
 use rand::{CryptoRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-
+use traits::Ntt;
 struct BVKeySwitchingKey {
     c0s: Box<[Poly]>,
     c1s: Box<[Poly]>,

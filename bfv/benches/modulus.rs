@@ -66,14 +66,14 @@ fn bench_modulus(c: &mut Criterion) {
             );
 
             group.bench_function(
-                BenchmarkId::new("eereduce_vec", format!("n={i}/logq={logq}")),
+                BenchmarkId::new("reduce_vec", format!("n={i}/logq={logq}")),
                 |b| {
                     b.iter(|| modulus.reduce_vec(&mut v));
                 },
             );
 
             group.bench_function(
-                BenchmarkId::new("eereduce_naive_vec", format!("n={i}/logq={logq}")),
+                BenchmarkId::new("reduce_naive_vec", format!("n={i}/logq={logq}")),
                 |b| {
                     b.iter(|| modulus.reduce_naive_vec(&mut v));
                 },
@@ -118,22 +118,6 @@ fn bench_modulus(c: &mut Criterion) {
                     b.iter_batched(
                         || s_v.clone(),
                         |mut vals| Modulus::switch_modulus(&mut vals, prime_30bits, prime),
-                        criterion::BatchSize::PerIteration,
-                    )
-                },
-            );
-
-            group.bench_function(
-                BenchmarkId::new(
-                    "switch_modulus_new_gt_than_old",
-                    format!("n={i}/logq={logq}"),
-                ),
-                |b| {
-                    b.iter_batched(
-                        || s_v.clone(),
-                        |mut vals| {
-                            Modulus::switch_modulus_new_gt_than_old(&mut vals, prime_30bits, prime)
-                        },
                         criterion::BatchSize::PerIteration,
                     )
                 },

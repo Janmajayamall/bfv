@@ -54,8 +54,7 @@ impl Plaintext {
         let mut m1 = vec![0u64; params.degree];
         let mut m = m.to_vec();
 
-        // FIXME: using `reduce_naive_vec` becuse `reduce_vec` is slower.
-        params.plaintext_modulus_op.reduce_naive_vec(&mut m);
+        params.plaintext_modulus_op.reduce_vec(&mut m);
         m.iter().enumerate().for_each(|(i, v)| {
             if encoding.encoding_type == EncodingType::Simd {
                 m1[params.matrix_reps_index_map[i]] = *v;
