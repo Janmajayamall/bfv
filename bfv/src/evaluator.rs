@@ -3,14 +3,15 @@ use crate::{BfvParameters, EvaluationKey, PolyType};
 use crate::{Encoding, GaloisKey, Plaintext, SecretKey};
 use crate::{Poly, Representation};
 use itertools::{izip, Itertools};
-use rand::{CryptoRng, RngCore};
+use num_bigint::{BigUint, RandBigInt};
+use rand::{thread_rng, CryptoRng, Rng, RngCore};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Ciphertext {
     pub(crate) c: Vec<Poly>,
-    pub poly_type: PolyType,
-    pub level: usize,
+    pub(crate) poly_type: PolyType,
+    pub(crate) level: usize,
 }
 
 impl Ciphertext {
@@ -28,6 +29,14 @@ impl Ciphertext {
 
     pub fn c_ref(&self) -> &[Poly] {
         &self.c
+    }
+
+    pub fn poly_type(&self) -> PolyType {
+        self.poly_type.clone()
+    }
+
+    pub fn level(&self) -> usize {
+        self.level
     }
 }
 
@@ -285,6 +294,23 @@ impl Evaluator {
         ctx.neg_assign(&mut c0.c[1]);
     }
 
+    pub fn mod_down_next(&self, c0: &mut Ciphertext) {
+        assert!(c0.poly_type == PolyType::Q);
+        let level = c0.level;
+        let ctx = self.params.poly_ctx(&c0.poly_type, level);
+        c0.c.iter_mut().for_each(|p| {
+            ctx.mod_down_next(p, &self.params.lastq_inv_modql[level]);
+        });
+        c0.level = level + 1;
+    }
+
+    pub fn mod_down_level(&self, c0: &mut Ciphertext, level: usize) {
+        let start_level = c0.level;
+        for _ in start_level..level {
+            self.mod_down_next(c0);
+        }
+    }
+
     pub fn plaintext_encode(&self, m: &[u64], encoding: Encoding) -> Plaintext {
         Plaintext::encode(m, &self.params, encoding)
     }
@@ -308,6 +334,24 @@ impl Evaluator {
 
     pub fn measure_noise(&self, sk: &SecretKey, ct: &Ciphertext) -> u64 {
         sk.measure_noise(ct, &self.params)
+    }
+
+    pub unsafe fn add_noise(&self, c0: &mut Ciphertext, bit_size: usize) {
+        let ctx = self.params.poly_ctx(&c0.poly_type, c0.level);
+
+        // sample biguint
+        let mut rng = thread_rng();
+        let biguints = (0..ctx.degree)
+            .into_iter()
+            .map(|_| rng.gen_biguint(bit_size as u64))
+            .collect_vec();
+
+        let mut noise_poly = ctx.try_convert_from_biguint(&biguints, Representation::Coefficient);
+        ctx.change_representation(&mut noise_poly, c0.c_ref()[0].representation.clone());
+
+        c0.c_ref_mut().iter_mut().for_each(|p| {
+            ctx.add_assign(p, &noise_poly);
+        });
     }
 }
 
@@ -466,5 +510,26 @@ mod tests {
         );
 
         println!("Time: Lazy={:?}  Normal:{:?}", lazy_time, normal_time);
+    }
+
+    #[test]
+    fn add_noise_works() {
+        let mut rng = thread_rng();
+        let params = BfvParameters::default(15, 1 << 3);
+
+        let sk = SecretKey::random(params.degree, &mut rng);
+        let mut m0 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+
+        let evaluator = Evaluator::new(params);
+        let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
+        let mut ct = evaluator.encrypt(&sk, &pt0, &mut rng);
+
+        println!("Noise before: {}", evaluator.measure_noise(&sk, &ct));
+        unsafe {
+            evaluator.add_noise(&mut ct, 100);
+        }
+        println!("Noise after: {}", evaluator.measure_noise(&sk, &ct));
     }
 }

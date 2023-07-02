@@ -13,7 +13,7 @@ fhe-util = { git = "https://github.com/Janmajayamall/fhe.rs", branch = "compare"
 rand = "0.8.5"
 ndarray = {version = "0.15.6"}
 itertools = "0.10.5"
-num-bigint = "0.4.3"
+num-bigint = {version= "0.4.3", features = ["rand"]}
 num-traits = "0.2.15"
 crypto-bigint = "0.4.9"
 rand_chacha = "0.3.1"

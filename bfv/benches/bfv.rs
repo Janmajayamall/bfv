@@ -1,6 +1,6 @@
 use bfv::{
     BfvParameters, Encoding, EvaluationKey, Evaluator, Plaintext, PolyType, RelinearizationKey,
-    SecretKey,
+    Representation, SecretKey,
 };
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use itertools::Itertools;
@@ -50,6 +50,17 @@ fn bench_bfv(c: &mut Criterion) {
                 },
             );
 
+            let mut c0_c1_in_pq = evaluator.mul_lazy(&c0, &c1);
+            let c0_c1_in_pq_2 = evaluator.mul_lazy(&c0, &c1);
+            group.bench_function(
+                BenchmarkId::new("add_assign_lazy", format!("n={degree}/logq={logq}")),
+                |b| {
+                    b.iter(|| {
+                        let _ = evaluator.add_assign(&mut c0_c1_in_pq, &c0_c1_in_pq_2);
+                    });
+                },
+            );
+
             let c0_c1 = evaluator.mul(&c0, &c1);
             let ek = EvaluationKey::new(evaluator.params(), &sk, &[0], &[0], &[0], &mut rng);
             group.bench_function(
@@ -67,6 +78,16 @@ fn bench_bfv(c: &mut Criterion) {
                 |b| {
                     b.iter(|| {
                         let _ = evaluator.rotate(&c0, 1, &ek);
+                    });
+                },
+            );
+
+            let mut c0_clone = c0.clone();
+            group.bench_function(
+                BenchmarkId::new("add_assign", format!("n={degree}/logq={logq}")),
+                |b| {
+                    b.iter(|| {
+                        let _ = evaluator.add_assign(&mut c0_clone, &c1);
                     });
                 },
             );
