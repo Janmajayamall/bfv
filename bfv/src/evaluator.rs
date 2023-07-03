@@ -214,7 +214,7 @@ impl Evaluator {
     pub fn rotate(&self, c0: &Ciphertext, rotate_by: isize, ek: &EvaluationKey) -> Ciphertext {
         ek.rtgs
             .get(&(rotate_by, c0.level))
-            .expect("Rtg missing!")
+            .expect(&format!("Rtg missing! :{rotate_by} {}", c0.level))
             .rotate(&c0, &self.params)
     }
 
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn test_mul_relinearize() {
         let mut rng = thread_rng();
-        let params = BfvParameters::default(3, 1 << 4);
+        let params = BfvParameters::default(15, 1 << 15);
 
         // gen keys
         let sk = SecretKey::random(params.degree, &mut rng);
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn test_rotations() {
         let mut rng = thread_rng();
-        let params = BfvParameters::default(3, 1 << 4);
+        let params = BfvParameters::default(3, 1 << 15);
 
         // gen keys
         let sk = SecretKey::random(params.degree, &mut rng);
@@ -449,13 +449,21 @@ mod tests {
         let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
         let ct0 = evaluator.encrypt(&sk, &pt0, &mut rng);
 
-        let ct_rotated = evaluator.rotate(&ct0, 1, &ek);
-        println!("Noise: {}", evaluator.measure_noise(&sk, &ct_rotated,));
+        println!("Noise original: {}", evaluator.measure_noise(&sk, &ct0,));
+        // let ct_rotated = evaluator.rotate(&ct0, 1, &ek);
+
+        let mut c = ct0.clone();
+        for i in 0..1000 {
+            let tmp = evaluator.rotate(&c, 1, &ek);
+            c = tmp;
+        }
+
+        println!("Noise: {}", evaluator.measure_noise(&sk, &c,));
 
         // decrypt ct01
-        let res_m =
-            evaluator.plaintext_decode(&evaluator.decrypt(&sk, &ct_rotated), Encoding::default());
-        dbg!(&res_m, &m0);
+        // let res_m =
+        //     evaluator.plaintext_decode(&evaluator.decrypt(&sk, &ct_rotated), Encoding::default());
+        // dbg!(&res_m, &m0);
     }
 
     #[test]

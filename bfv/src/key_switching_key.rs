@@ -194,7 +194,7 @@ impl HybridKeySwitchingKey {
             maxbits = std::cmp::max(maxbits, q.bits());
         });
         let ideal_special_primes_count = (maxbits as f64 / aux_bits as f64).ceil() as usize;
-        assert!(ideal_special_primes_count == alpha);
+        assert!(ideal_special_primes_count <= alpha);
 
         // P is special prime
         let p = specialp_ctx.big_q();

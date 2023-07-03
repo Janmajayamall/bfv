@@ -510,7 +510,7 @@ where
 
         // Hybrid key switching
         const ALPHA: usize = 3;
-        let aux_bits = 60;
+        let aux_bits = 50;
         let dnum = (ciphertext_moduli.len() as f64 / ALPHA as f64).ceil() as usize;
         let special_moduli = generate_primes_vec(&[aux_bits; ALPHA], degree, &ciphertext_moduli);
         let special_moduli_ops = special_moduli
