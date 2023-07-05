@@ -867,7 +867,7 @@ where
             self.iter_moduli_ops()
         )
         .for_each(|(mut pr, p1, p2, q)| {
-            q.add_mod_fast_vec_uninit(
+            q.sub_mod_fast_vec_uninit(
                 pr.as_slice_mut().unwrap(),
                 p1.as_slice().unwrap(),
                 p2.as_slice().unwrap(),
@@ -909,7 +909,7 @@ where
             self.iter_moduli_ops()
         )
         .for_each(|(mut pr, p1, p2, q)| {
-            q.add_mod_fast_vec_uninit(
+            q.mul_mod_fast_vec_uninit(
                 pr.as_slice_mut().unwrap(),
                 p1.as_slice().unwrap(),
                 p2.as_slice().unwrap(),
