@@ -214,9 +214,9 @@ fn bench_poly(c: &mut Criterion) {
             group.bench_function(BenchmarkId::new("approx_mod_down", ""), |b| {
                 b.iter_batched(
                     || qp_poly.clone(),
-                    |mut p| {
-                        qp_ctx.approx_mod_down(
-                            &mut p,
+                    |p| {
+                        let _ = qp_ctx.approx_mod_down(
+                            p,
                             &q_ctx,
                             &specialp_ctx,
                             &p_hat_inv_modp,

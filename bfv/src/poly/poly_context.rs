@@ -658,13 +658,13 @@ where
     /// we get rid uP by dividing the final value by P.
     pub fn approx_mod_down(
         &self,
-        qp_poly: &mut Poly,
+        mut qp_poly: Poly,
         q_context: &PolyContext<'_, T>,
         p_context: &PolyContext<'_, T>,
         p_hat_inv_modp: &[u64],
         p_hat_modq: &Array2<u64>,
         p_inv_modq: &[u64],
-    ) {
+    ) -> Poly {
         debug_assert!(q_context.moduli_count + p_context.moduli_count == self.moduli_count);
         debug_assert!(qp_poly.representation == Representation::Evaluation);
 
@@ -698,11 +698,11 @@ where
             ntt_op.forward(v.as_slice_mut().unwrap());
         });
 
-        qp_poly.coefficients.slice_collapse(s![..q_size, ..]);
-        debug_assert!(qp_poly.coefficients.shape()[0] == q_size);
+        let mut q_poly = qp_poly.coefficients.slice_move(s![..q_size, ..]);
+        debug_assert!(q_poly.shape()[0] == q_size);
 
         izip!(
-            qp_poly.coefficients.outer_iter_mut(),
+            q_poly.outer_iter_mut(),
             p_to_q_coefficients.outer_iter(),
             q_context.iter_moduli_ops(),
             p_inv_modq.iter(),
@@ -711,6 +711,8 @@ where
             modqi.sub_mod_fast_vec(v.as_slice_mut().unwrap(), switched_v.as_slice().unwrap());
             modqi.scalar_mul_mod_fast_vec(v.as_slice_mut().unwrap(), *p_inv_modqi);
         });
+
+        Poly::new(q_poly, Representation::Evaluation)
     }
 
     /// Switches polynomial from Q to Q' and scales by 1/qn where Q = q0*q1*q2...*qn and Q' = q0*q1*q2...*q(n-1).
@@ -1366,8 +1368,8 @@ mod tests {
         let mut q_res = qp_poly.clone();
 
         let now = std::time::Instant::now();
-        qp_context.approx_mod_down(
-            &mut q_res,
+        let mut q_res = qp_context.approx_mod_down(
+            q_res,
             &q_context,
             &p_context,
             &p_hat_inv_modp,

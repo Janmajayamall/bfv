@@ -422,8 +422,8 @@ impl HybridKeySwitchingKey {
         }
 
         // switch results from QP to Q
-        qp_ctx.approx_mod_down(
-            &mut c0_out,
+        let c0_out = qp_ctx.approx_mod_down(
+            c0_out,
             &ksk_ctx,
             &specialp_ctx,
             &self.p_hat_inv_modp,
@@ -431,8 +431,8 @@ impl HybridKeySwitchingKey {
             &self.p_inv_modq,
         );
 
-        qp_ctx.approx_mod_down(
-            &mut c1_out,
+        let c1_out = qp_ctx.approx_mod_down(
+            c1_out,
             &ksk_ctx,
             &specialp_ctx,
             &self.p_hat_inv_modp,

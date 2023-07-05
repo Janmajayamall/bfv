@@ -540,4 +540,45 @@ mod tests {
         }
         println!("Noise after: {}", evaluator.measure_noise(&sk, &ct));
     }
+
+    #[test]
+    fn reproduce_ram_rot() {
+        let mut rng = thread_rng();
+        let params = BfvParameters::default(15, 1 << 15);
+        let mut level = 12;
+
+        // gen keys
+        let sk = SecretKey::random(params.degree, &mut rng);
+
+        let m0 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+
+        let evaluator = Evaluator::new(params);
+        let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
+        let mut ct0 = evaluator.encrypt(&sk, &pt0, &mut rng);
+        evaluator.mod_down_level(&mut ct0, level);
+
+        evaluator.ciphertext_change_representation(&mut ct0, Representation::Evaluation);
+
+        println!("Noise original: {}", evaluator.measure_noise(&sk, &ct0,));
+        // let ct_rotated = evaluator.rotate(&ct0, 1, &ek);
+
+        let pt1 = evaluator.plaintext_encode(&m0, Encoding::simd(level));
+
+        let ek = EvaluationKey::new(evaluator.params(), &sk, &[], &[level], &[1], &mut rng);
+        let mut rotated_vales = vec![];
+        for i in 0..10000 {
+            rotated_vales.push(evaluator.mul_poly(&ct0, pt1.poly_ntt_ref()));
+        }
+
+        rotated_vales.iter().for_each(|c| {
+            dbg!(evaluator.measure_noise(&sk, c));
+        });
+
+        // decrypt ct01
+        // let res_m =
+        //     evaluator.plaintext_decode(&evaluator.decrypt(&sk, &ct_rotated), Encoding::default());
+        // dbg!(&res_m, &m0);
+    }
 }
