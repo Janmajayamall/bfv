@@ -310,7 +310,7 @@ impl Modulus {
         });
 
         #[cfg(feature = "hexl")]
-        hexl_rs::elwise_add_mod(a, b, self.modulus, a.len() as u64)
+        hexl_rs::elwise_add_mod_uinit(r, a, b, self.modulus, r.len() as u64)
     }
 
     pub fn sub_mod_naive_vec(&self, a: &mut [u64], b: &[u64]) {
@@ -335,7 +335,7 @@ impl Modulus {
         });
 
         #[cfg(feature = "hexl")]
-        hexl_rs::elwise_add_mod(a, b, self.modulus, a.len() as u64)
+        hexl_rs::elwise_sub_mod_uinit(r, a, b, self.modulus, r.len() as u64)
     }
 
     pub fn neg_mod_fast_vec(&self, a: &mut [u64]) {
@@ -380,7 +380,7 @@ impl Modulus {
         });
 
         #[cfg(feature = "hexl")]
-        hexl_rs::elwise_add_mod(a, b, self.modulus, a.len() as u64)
+        hexl_rs::elwise_mult_mod_uinit(r, a, b, self.modulus, r.len() as u64, 1);
     }
 
     pub fn mul_mod_shoup_vec(&self, a: &mut [u64], b: &[u64], b_shoup: &[u64]) {
