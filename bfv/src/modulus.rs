@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use itertools::{izip, Itertools};
 use num_bigint::U64Digits;
 use num_bigint_dig::{prime::probably_prime, BigUint};
@@ -301,6 +303,16 @@ impl Modulus {
         hexl_rs::elwise_add_mod(a, b, self.modulus, a.len() as u64)
     }
 
+    pub fn add_mod_fast_vec_uninit(&self, r: &mut [MaybeUninit<u64>], a: &[u64], b: &[u64]) {
+        #[cfg(not(feature = "hexl"))]
+        izip!(r.iter_mut(), a.iter(), b.iter()).for_each(|(vr, va, vb)| {
+            vr.write(self.add_mod_fast(*va, *vb));
+        });
+
+        #[cfg(feature = "hexl")]
+        hexl_rs::elwise_add_mod(a, b, self.modulus, a.len() as u64)
+    }
+
     pub fn sub_mod_naive_vec(&self, a: &mut [u64], b: &[u64]) {
         izip!(a.iter_mut(), b.iter()).for_each(|(va, vb)| *va = self.sub_mod_naive(*va, *vb));
     }
@@ -316,8 +328,24 @@ impl Modulus {
         hexl_rs::elwise_sub_mod(a, b, self.modulus, a.len() as u64)
     }
 
+    pub fn sub_mod_fast_vec_uninit(&self, r: &mut [MaybeUninit<u64>], a: &[u64], b: &[u64]) {
+        #[cfg(not(feature = "hexl"))]
+        izip!(r.iter_mut(), a.iter(), b.iter()).for_each(|(vr, va, vb)| {
+            vr.write(self.sub_mod_fast(*va, *vb));
+        });
+
+        #[cfg(feature = "hexl")]
+        hexl_rs::elwise_add_mod(a, b, self.modulus, a.len() as u64)
+    }
+
     pub fn neg_mod_fast_vec(&self, a: &mut [u64]) {
         izip!(a.iter_mut()).for_each(|va| *va = self.neg_mod_fast(*va));
+    }
+
+    pub fn neg_mod_fast_vec_uninit(&self, r: &mut [MaybeUninit<u64>], a: &[u64]) {
+        izip!(r.iter_mut(), a.iter()).for_each(|(vr, va)| {
+            vr.write(self.neg_mod_fast(*va));
+        });
     }
 
     /// subracts a from b
@@ -345,17 +373,19 @@ impl Modulus {
         hexl_rs::elwise_mult_mod(a, b, self.modulus, a.len() as u64, 1)
     }
 
+    pub fn mul_mod_fast_vec_uninit(&self, r: &mut [MaybeUninit<u64>], a: &[u64], b: &[u64]) {
+        #[cfg(not(feature = "hexl"))]
+        izip!(r.iter_mut(), a.iter(), b.iter()).for_each(|(vr, va, vb)| {
+            vr.write(self.mul_mod_fast(*va, *vb));
+        });
+
+        #[cfg(feature = "hexl")]
+        hexl_rs::elwise_add_mod(a, b, self.modulus, a.len() as u64)
+    }
+
     pub fn mul_mod_shoup_vec(&self, a: &mut [u64], b: &[u64], b_shoup: &[u64]) {
         izip!(a.iter_mut(), b.iter(), b_shoup.iter())
             .for_each(|(va, vb, vb_shoup)| *va = self.mul_mod_shoup(*va, *vb, *vb_shoup));
-    }
-
-    /// FMA reverse
-    /// Reverse because calculates a + b*c
-    pub fn fma_reverse_vec(&self, a: &mut [u64], b: &[u64], c: &[u64]) {
-        let mut b = b.to_vec();
-        self.mul_mod_fast_vec(&mut b, c);
-        self.add_mod_fast_vec(a, &b);
     }
 
     /// Barrett modulus multiplication of scalar with vector a
@@ -674,25 +704,6 @@ mod tests {
                 })
                 .collect_vec()
         );
-    }
-
-    #[test]
-    fn fma_reverse_vec_works() {
-        let prime = generate_prime(60, 16, 1 << 60).unwrap();
-        let modulus = Modulus::new(prime);
-        let mut rng = thread_rng();
-        let mut a = modulus.random_vec(1 << 3, &mut rng);
-        let a_clone = a.clone();
-        let b = modulus.random_vec(1 << 3, &mut rng);
-        let c = modulus.random_vec(1 << 3, &mut rng);
-        modulus.fma_reverse_vec(&mut a, &b, &c);
-
-        izip!(a.iter(), a_clone.iter(), b.iter(), c.iter()).for_each(|(r, a0, b0, c0)| {
-            assert_eq!(
-                *r,
-                (a0 + ((*b0 as u128 * *c0 as u128) % prime as u128) as u64) % prime
-            );
-        })
     }
 
     #[test]

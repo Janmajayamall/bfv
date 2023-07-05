@@ -719,6 +719,17 @@ where
     ///
     /// Works for both coefficient and evaluation representation, but latter is expensive since you need to pay for
     /// 1 + (n-1) NTT ops.
+    ///
+    /// # Warn
+    /// Even though the row corresponding to last_qi (ie last row) in `poly.coefficients` is rendered useless after
+    /// mod_down_next, it still owned by `poly`. This is because we use `slice_collapse` instead of `slice_move` which
+    /// only restricts the view to last row instead of removing it. Hence, mod_down_next does not result in lower memory
+    /// size of the poly. This implies that all `clone` operations will result in `poly` of original memory size. This can
+    /// cause unecessary memeory usage if `poly` is cloned without care.
+    ///
+    /// Usage of `slice_collapse` is preferred over `slice_move` because latter would require to transfer ownership of poly,
+    /// which forces `mod_down_next` on `Ciphertext` to require ownership transfer. This will force users to handle ownership
+    /// transfer of ciphertexts instead of passing them as mutable references.
     pub fn mod_down_next(&self, poly: &mut Poly, last_qi_inv_modq: &[u64]) {
         let (mut coeffs, mut p) = poly
             .coefficients
@@ -753,28 +764,6 @@ where
         poly.coefficients.slice_collapse(s![..-1, ..]);
     }
 
-    pub fn fma_reverse_inplace(&self, p0: &mut Poly, p1: &Poly, p2: &Poly) {
-        izip!(
-            p0.coefficients.outer_iter_mut(),
-            p1.coefficients.outer_iter(),
-            p2.coefficients.outer_iter(),
-            self.iter_moduli_ops()
-        )
-        .for_each(|(mut a, b, c, modqi)| {
-            modqi.fma_reverse_vec(
-                a.as_slice_mut().unwrap(),
-                b.as_slice().unwrap(),
-                c.as_slice().unwrap(),
-            )
-        });
-    }
-
-    pub fn fma_reverse(&self, p0: &Poly, p1: &Poly, p2: &Poly) -> Poly {
-        let mut p = p0.clone();
-        self.fma_reverse_inplace(&mut p, p1, p2);
-        p
-    }
-
     /// p0 = p1 - p0;
     pub fn sub_reversed_inplace(&self, p0: &mut Poly, p1: &Poly) {
         debug_assert!(p0.representation == p1.representation);
@@ -796,10 +785,23 @@ where
         );
     }
 
-    pub fn neg(self, p0: Poly) -> Poly {
-        let mut p0 = p0.clone();
-        self.neg_assign(&mut p0);
-        p0
+    pub fn neg(self, poly: Poly) -> Poly {
+        let mut coeffs = Array2::<u64>::uninit((self.moduli_count, self.degree));
+
+        izip!(
+            coeffs.outer_iter_mut(),
+            poly.coefficients.outer_iter(),
+            self.iter_moduli_ops()
+        )
+        .for_each(|(mut pr, p1, q)| {
+            q.neg_mod_fast_vec_uninit(pr.as_slice_mut().unwrap(), p1.as_slice().unwrap());
+        });
+
+        let coeffs = unsafe { coeffs.assume_init() };
+        Poly {
+            coefficients: coeffs,
+            representation: poly.representation.clone(),
+        }
     }
 
     pub fn add_assign(&self, lhs: &mut Poly, rhs: &Poly) {
@@ -816,9 +818,29 @@ where
     }
 
     pub fn add(&self, lhs: &Poly, rhs: &Poly) -> Poly {
-        let mut lhs = lhs.clone();
-        self.add_assign(&mut lhs, rhs);
-        lhs
+        debug_assert!(lhs.representation == rhs.representation);
+
+        let mut coeffs = Array2::<u64>::uninit((self.moduli_count, self.degree));
+
+        izip!(
+            coeffs.outer_iter_mut(),
+            lhs.coefficients.outer_iter(),
+            rhs.coefficients.outer_iter(),
+            self.iter_moduli_ops()
+        )
+        .for_each(|(mut pr, p1, p2, q)| {
+            q.add_mod_fast_vec_uninit(
+                pr.as_slice_mut().unwrap(),
+                p1.as_slice().unwrap(),
+                p2.as_slice().unwrap(),
+            );
+        });
+
+        let coeffs = unsafe { coeffs.assume_init() };
+        Poly {
+            coefficients: coeffs,
+            representation: lhs.representation.clone(),
+        }
     }
 
     pub fn sub_assign(&self, lhs: &mut Poly, rhs: &Poly) {
@@ -834,9 +856,29 @@ where
     }
 
     pub fn sub(&self, lhs: &Poly, rhs: &Poly) -> Poly {
-        let mut lhs = lhs.clone();
-        self.sub_assign(&mut lhs, rhs);
-        lhs
+        debug_assert!(lhs.representation == rhs.representation);
+
+        let mut coeffs = Array2::<u64>::uninit((self.moduli_count, self.degree));
+
+        izip!(
+            coeffs.outer_iter_mut(),
+            lhs.coefficients.outer_iter(),
+            rhs.coefficients.outer_iter(),
+            self.iter_moduli_ops()
+        )
+        .for_each(|(mut pr, p1, p2, q)| {
+            q.add_mod_fast_vec_uninit(
+                pr.as_slice_mut().unwrap(),
+                p1.as_slice().unwrap(),
+                p2.as_slice().unwrap(),
+            );
+        });
+
+        let coeffs = unsafe { coeffs.assume_init() };
+        Poly {
+            coefficients: coeffs,
+            representation: lhs.representation.clone(),
+        }
     }
 
     pub fn mul_assign(&self, lhs: &mut Poly, rhs: &Poly) {
@@ -856,9 +898,29 @@ where
     }
 
     pub fn mul(&self, lhs: &Poly, rhs: &Poly) -> Poly {
-        let mut lhs = lhs.clone();
-        self.mul_assign(&mut lhs, rhs);
-        lhs
+        debug_assert!(lhs.representation == rhs.representation);
+
+        let mut coeffs = Array2::<u64>::uninit((self.moduli_count, self.degree));
+
+        izip!(
+            coeffs.outer_iter_mut(),
+            lhs.coefficients.outer_iter(),
+            rhs.coefficients.outer_iter(),
+            self.iter_moduli_ops()
+        )
+        .for_each(|(mut pr, p1, p2, q)| {
+            q.add_mod_fast_vec_uninit(
+                pr.as_slice_mut().unwrap(),
+                p1.as_slice().unwrap(),
+                p2.as_slice().unwrap(),
+            );
+        });
+
+        let coeffs = unsafe { coeffs.assume_init() };
+        Poly {
+            coefficients: coeffs,
+            representation: lhs.representation.clone(),
+        }
     }
 }
 
