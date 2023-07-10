@@ -510,7 +510,7 @@ where
 
         // Hybrid key switching
         const ALPHA: usize = 3;
-        let aux_bits = 50;
+        let aux_bits = ciphertext_moduli_sizes.iter().max().unwrap().clone();
         let dnum = (ciphertext_moduli.len() as f64 / ALPHA as f64).ceil() as usize;
         let special_moduli = generate_primes_vec(&[aux_bits; ALPHA], degree, &ciphertext_moduli);
         let special_moduli_ops = special_moduli
@@ -646,4 +646,15 @@ where
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use crate::BfvParameters;
+
+    #[test]
+    fn trial() {
+        // dbg!(BfvParameters::v_norm(3.2, 1 << 15));
+        dbg!(BfvParameters::noise_ks(10, 3.2, 1 << 15, 60));
+        let params = BfvParameters::default(9, 1 << 15);
+        let sp = params.poly_ctx(&crate::PolyType::SpecialP, 0);
+        dbg!(sp.big_q());
+    }
+}

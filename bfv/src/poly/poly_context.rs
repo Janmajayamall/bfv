@@ -725,7 +725,7 @@ where
     /// mod_down_next, it still owned by `poly`. This is because we use `slice_collapse` instead of `slice_move` which
     /// only restricts the view to last row instead of removing it. Hence, mod_down_next does not result in lower memory
     /// size of the poly. This implies that all `clone` operations will result in `poly` of original memory size. This can
-    /// cause unecessary memeory usage if `poly` is cloned without care.
+    /// cause unecessary memeory usage if `poly` is cloned without care. Alternatively use `to_owned` instead of `clone`.
     ///
     /// Usage of `slice_collapse` is preferred over `slice_move` because latter would require to transfer ownership of poly,
     /// which forces `mod_down_next` on `Ciphertext` to require ownership transfer. This will force users to handle ownership

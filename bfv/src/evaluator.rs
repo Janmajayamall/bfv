@@ -23,6 +23,14 @@ impl Ciphertext {
         }
     }
 
+    pub fn placeholder() -> Ciphertext {
+        Ciphertext {
+            c: vec![],
+            poly_type: PolyType::Q,
+            level: 0,
+        }
+    }
+
     pub fn c_ref_mut(&mut self) -> &mut [Poly] {
         &mut self.c
     }
@@ -453,7 +461,7 @@ mod tests {
         // let ct_rotated = evaluator.rotate(&ct0, 1, &ek);
 
         let mut c = ct0.clone();
-        for i in 0..1000 {
+        for _ in 0..1 {
             let tmp = evaluator.rotate(&c, 1, &ek);
             c = tmp;
         }
