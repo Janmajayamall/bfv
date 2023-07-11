@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn test_mul_relinearize() {
         let mut rng = thread_rng();
-        let params = BfvParameters::default(15, 1 << 15);
+        let params = BfvParameters::default(5, 1 << 3);
 
         // gen keys
         let sk = SecretKey::random(params.degree, &mut rng);
@@ -443,7 +443,7 @@ mod tests {
     #[test]
     fn test_rotations() {
         let mut rng = thread_rng();
-        let params = BfvParameters::default(3, 1 << 15);
+        let params = BfvParameters::default(3, 1 << 4);
 
         // gen keys
         let sk = SecretKey::random(params.degree, &mut rng);

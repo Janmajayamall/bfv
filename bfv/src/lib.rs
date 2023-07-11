@@ -17,7 +17,7 @@ pub use galois_key::*;
 pub use key_switching_key::*;
 pub use modulus::*;
 pub use nb_theory::*;
-pub use parameters::PolyType;
+pub use parameters::{HybridKeySwitchingParameters, PolyType};
 pub use plaintext::*;
 pub use poly::{Poly, Representation, Substitution};
 pub use relinearization_key::*;

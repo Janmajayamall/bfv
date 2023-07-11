@@ -3,7 +3,6 @@ use crate::{
     Representation, SecretKey, Substitution,
 };
 use rand::{CryptoRng, RngCore};
-use traits::Ntt;
 
 pub struct GaloisKey {
     substitution: Substitution,
@@ -23,7 +22,6 @@ impl GaloisKey {
 
         let q_ctx = params.poly_ctx(&PolyType::Q, level);
         let qp_ctx = params.poly_ctx(&PolyType::QP, level);
-        let specialp_ctx = params.poly_ctx(&PolyType::SpecialP, level);
 
         // Substitute secret key
         let mut sk_poly =
@@ -34,13 +32,10 @@ impl GaloisKey {
 
         // Generate key switching key for substituted secret key
         let ksk_key = HybridKeySwitchingKey::new(
+            params.hybrid_key_switching_params_at_level(level),
             &sk_poly,
             &sk,
-            &q_ctx,
-            &specialp_ctx,
             &qp_ctx,
-            params.alpha,
-            params.aux_bits,
             rng,
         );
 
@@ -67,7 +62,13 @@ impl GaloisKey {
             q_ctx.change_representation(&mut c1, Representation::Coefficient);
         }
 
-        let (mut cs0, mut cs1) = self.ksk_key.switch(&c1, &qp_ctx, &q_ctx, &specialp_ctx);
+        let (mut cs0, mut cs1) = self.ksk_key.switch(
+            params.hybrid_key_switching_params_at_level(level),
+            &c1,
+            &qp_ctx,
+            &q_ctx,
+            &specialp_ctx,
+        );
 
         // Key switch returns polynomial in Evaluation form
         if ct.c[0].representation != cs0.representation {

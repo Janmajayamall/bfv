@@ -17,7 +17,6 @@ impl RelinearizationKey {
     ) -> RelinearizationKey {
         let q_ctx = params.poly_ctx(&PolyType::Q, level);
         let qp_ctx = params.poly_ctx(&PolyType::QP, level);
-        let specialp_ctx = params.poly_ctx(&PolyType::SpecialP, level);
 
         let mut sk_poly =
             q_ctx.try_convert_from_i64_small(&sk.coefficients, Representation::Coefficient);
@@ -28,13 +27,10 @@ impl RelinearizationKey {
 
         // Key switching key
         let ksk = HybridKeySwitchingKey::new(
+            params.hybrid_key_switching_params_at_level(level),
             &sk_sq,
             sk,
-            &q_ctx,
-            &specialp_ctx,
             &qp_ctx,
-            params.alpha,
-            params.aux_bits,
             rng,
         );
 
@@ -51,7 +47,13 @@ impl RelinearizationKey {
         let qp_ctx = params.poly_ctx(&PolyType::QP, level);
         let specialp_ctx = params.poly_ctx(&PolyType::SpecialP, level);
 
-        let (mut cs0, mut cs1) = self.ksk.switch(&ct.c[2], &qp_ctx, &q_ctx, &specialp_ctx);
+        let (mut cs0, mut cs1) = self.ksk.switch(
+            params.hybrid_key_switching_params_at_level(self.level),
+            &ct.c[2],
+            &qp_ctx,
+            &q_ctx,
+            &specialp_ctx,
+        );
         q_ctx.change_representation(&mut cs0, Representation::Coefficient);
         q_ctx.change_representation(&mut cs1, Representation::Coefficient);
 

@@ -90,6 +90,9 @@ pub struct BfvParameters<T: Ntt> {
     pub alpha: usize, // fixed to 3
     pub aux_bits: usize,
 
+    // Hybrid key switching key parameters
+    pub hybrid_ksk_parameters: Option<Vec<HybridKeySwitchingParameters>>,
+
     // Mod Down //
     pub lastq_inv_modql: Vec<Vec<u64>>,
 }
@@ -587,9 +590,30 @@ where
             special_moduli_ntt_ops,
             special_moduli_ops,
 
+            hybrid_ksk_parameters: None,
+
             // Mod down next //
             lastq_inv_modql,
         }
+    }
+
+    pub fn enable_hybrid_key_switching(&mut self) {
+        // generate hybrid key switching parameters for each level except the last one
+        let params = (0..self.max_level)
+            .into_iter()
+            .map(|level| {
+                let ksk_ctx = self.poly_ctx(&PolyType::Q, level);
+                let specialp_ctx = self.poly_ctx(&PolyType::SpecialP, level);
+                HybridKeySwitchingParameters::new(
+                    &ksk_ctx,
+                    &specialp_ctx,
+                    self.alpha,
+                    self.aux_bits,
+                )
+            })
+            .collect_vec();
+
+        self.hybrid_ksk_parameters = Some(params);
     }
 
     pub fn poly_ctx(&self, poly_type: &PolyType, level: usize) -> PolyContext<'_, T> {
@@ -640,8 +664,191 @@ where
         }
     }
 
+    pub fn hybrid_key_switching_params_at_level(
+        &self,
+        level: usize,
+    ) -> &HybridKeySwitchingParameters {
+        &self
+            .hybrid_ksk_parameters
+            .as_ref()
+            .expect("Hybrid Key Switching Parameters not initialized")[level]
+    }
+
     pub fn default(moduli_count: usize, polynomial_degree: usize) -> BfvParameters<T> {
-        BfvParameters::new(&vec![50; moduli_count], 65537, polynomial_degree)
+        let mut params = BfvParameters::new(&vec![50; moduli_count], 65537, polynomial_degree);
+        params.enable_hybrid_key_switching();
+        params
+    }
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct HybridKeySwitchingParameters {
+    pub(crate) dnum: usize,
+    pub(crate) alpha: usize,
+    pub(crate) aux_bits: usize,
+
+    pub(crate) g: Vec<BigUint>,
+
+    // approx_switch_crt_basis //
+    pub(crate) qj_hat_inv_modqj_parts: Vec<Vec<u64>>,
+    pub(crate) qj_moduli_ops_parts: Vec<Vec<Modulus>>,
+    pub(crate) qj_hat_modqpj_parts: Vec<Array2<u64>>,
+    pub(crate) qpj_moduli_ops_parts: Vec<Vec<Modulus>>,
+
+    // approx_mod_down //
+    pub(crate) p_hat_inv_modp: Vec<u64>,
+    pub(crate) p_hat_modq: Array2<u64>,
+    pub(crate) p_inv_modq: Vec<u64>,
+}
+
+impl HybridKeySwitchingParameters {
+    pub fn new<T: Ntt>(
+        ksk_ctx: &PolyContext<'_, T>,
+        specialp_ctx: &PolyContext<'_, T>,
+        alpha: usize,
+        aux_bits: usize,
+    ) -> HybridKeySwitchingParameters {
+        let mut qj = vec![];
+        ksk_ctx
+            .iter_moduli_ops()
+            .chunks(alpha)
+            .into_iter()
+            .for_each(|modqi_parts| {
+                // Qj
+                let mut qji = BigUint::one();
+                modqi_parts.into_iter().for_each(|modqi| {
+                    qji *= modqi.modulus();
+                });
+                qj.push(qji);
+            });
+
+        // This is just for precaution. Ideally alpha*aux_bits must be greater than maxbits. But
+        // having alpha*auxbits - maxbits greater than a few bits costs performance, since you end
+        // up having an additional special prime for nothing. In our case, alpha and aux_bites are fixed
+        // to 3 and 60. Hence, assuming that you have alpha consecutive ciphertext primes of size 40-60
+        // (usually the case for lower levels) it must be the case that maxbits is around 120.
+        let mut maxbits = qj[0].bits();
+        qj.iter().skip(1).for_each(|q| {
+            maxbits = std::cmp::max(maxbits, q.bits());
+        });
+        let ideal_special_primes_count = (maxbits as f64 / aux_bits as f64).ceil() as usize;
+        assert!(ideal_special_primes_count <= alpha);
+
+        // P is special prime
+        let p = specialp_ctx.big_q();
+
+        // Calculating g values + Pre-comp for switching Qj to QP.
+        let q = ksk_ctx.big_q();
+        // g = P * Q/Qj * [(Q/Qj)^-1]_Qj
+        let mut g = vec![];
+        // we are forced to use Vec insted of `ndarray` because each of the
+        // 2d vectors cannot be translated to a proper array in row major form.
+        let mut qj_hat_inv_modqj_parts = vec![];
+        let mut qj_hat_modqpj_parts = vec![];
+        let mut qpj_moduli_ops_parts = vec![];
+        let mut qj_moduli_ops_parts = vec![];
+
+        let parts = (ksk_ctx.moduli_count as f64 / alpha as f64).ceil() as usize;
+
+        ksk_ctx
+            .iter_moduli_ops()
+            .chunks(alpha)
+            .into_iter()
+            .enumerate()
+            .for_each(|(chunk_index, modqj)| {
+                let qj_moduli_ops = modqj.into_iter().map(|modqji| modqji.clone()).collect_vec();
+
+                // Qj
+                let mut qj = BigUint::one();
+                qj_moduli_ops.iter().for_each(|modqi| qj *= modqi.modulus());
+
+                // Q/Qj
+                let qj_hat = &q / &qj;
+
+                // [(Q/Qj)^-1]_Qj
+                let qj_hat_inv_modqj = mod_inverse_biguint(&qj_hat, &qj);
+                g.push(&p * qj_hat * qj_hat_inv_modqj);
+
+                // precomp approx_switch_crt_basis
+                let mut qj_hat_inv_modqj = vec![];
+                qj_moduli_ops.iter().for_each(|modqji| {
+                    let qji = modqji.modulus();
+                    qj_hat_inv_modqj
+                        .push(mod_inverse_biguint_u64(&(&qj / qji), qji).to_u64().unwrap());
+                });
+                qj_hat_inv_modqj_parts.push(qj_hat_inv_modqj);
+
+                let mut qpj_moduli_ops = vec![];
+                qpj_moduli_ops.extend_from_slice(&ksk_ctx.moduli_ops()[..alpha * chunk_index]);
+                qpj_moduli_ops.extend_from_slice(
+                    &ksk_ctx.moduli_ops()
+                        [std::cmp::min(ksk_ctx.moduli_count, alpha * (chunk_index + 1))..],
+                );
+                qpj_moduli_ops.extend_from_slice(specialp_ctx.moduli_ops());
+
+                let mut qj_hat_modqpj = vec![];
+                qpj_moduli_ops.iter().for_each(|modqpji| {
+                    qj_moduli_ops.iter().for_each(|modqji| {
+                        qj_hat_modqpj.push(
+                            ((&qj / modqji.modulus()) % modqpji.modulus())
+                                .to_u64()
+                                .unwrap(),
+                        )
+                    })
+                });
+                let qj_hat_modqpj = Array2::<u64>::from_shape_vec(
+                    (qpj_moduli_ops.len(), qj_moduli_ops.len()),
+                    qj_hat_modqpj,
+                )
+                .unwrap();
+
+                qj_hat_modqpj_parts.push(qj_hat_modqpj);
+                qpj_moduli_ops_parts.push(qpj_moduli_ops);
+                qj_moduli_ops_parts.push(qj_moduli_ops);
+            });
+
+        // Precompute for P to Q (used for approx_switch_crt_basis in approx_mod_down)
+        let mut p_hat_inv_modp = vec![];
+        let mut p_hat_modq = vec![];
+        specialp_ctx.iter_moduli_ops().for_each(|(modpi)| {
+            let pi = modpi.modulus();
+            let pi_hat = &p / pi;
+            p_hat_inv_modp.push(mod_inverse_biguint_u64(&pi_hat, pi).to_u64().unwrap());
+        });
+        ksk_ctx.iter_moduli_ops().for_each(|modqj| {
+            specialp_ctx.iter_moduli_ops().for_each(|(modpi)| {
+                p_hat_modq.push(((&p / modpi.modulus()) % modqj.modulus()).to_u64().unwrap());
+            });
+        });
+        let p_hat_modq = Array2::from_shape_vec((ksk_ctx.moduli_count, alpha), p_hat_modq).unwrap();
+        let mut p_inv_modq = vec![];
+        // Precompute for dividing values in basis Q by P (approx_mod_down)
+        ksk_ctx.iter_moduli_ops().for_each(|modqi| {
+            p_inv_modq.push(
+                mod_inverse_biguint_u64(&p, modqi.modulus())
+                    .to_u64()
+                    .unwrap(),
+            );
+        });
+
+        HybridKeySwitchingParameters {
+            dnum: parts,
+            alpha,
+            aux_bits,
+
+            g,
+
+            // approx_switch_crt_basis //
+            qj_hat_inv_modqj_parts,
+            qj_moduli_ops_parts,
+            qj_hat_modqpj_parts,
+            qpj_moduli_ops_parts,
+
+            // approx_mod_down //
+            p_hat_inv_modp,
+            p_hat_modq,
+            p_inv_modq,
+        }
     }
 }
 
