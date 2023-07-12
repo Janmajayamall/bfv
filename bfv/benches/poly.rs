@@ -200,7 +200,7 @@ fn bench_poly(c: &mut Criterion) {
             group.bench_function(BenchmarkId::new("approx_switch_crt_basis", ""), |b| {
                 b.iter(|| {
                     PolyContext::approx_switch_crt_basis(
-                        &specialp_poly.coefficients.view(),
+                        &specialp_poly.coefficients_ref().view(),
                         specialp_ctx.moduli_ops(),
                         degree,
                         &p_hat_inv_modp,

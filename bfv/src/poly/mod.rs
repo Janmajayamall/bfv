@@ -1,5 +1,5 @@
-use crate::proto;
-use itertools::Itertools;
+use crate::{convert_from_bytes, convert_to_bytes, proto};
+use itertools::{izip, Itertools};
 use ndarray::Array2;
 pub mod poly_context;
 
@@ -73,8 +73,78 @@ impl Poly {
             representation: Representation::Unknown,
         }
     }
+
+    pub fn coefficients_ref(&self) -> &Array2<u64> {
+        &self.coefficients
+    }
 }
 
 impl Poly {
-    // fn to_proto(&self, poly_ctx: crate::PolyContext<'_>) -> proto::Poly {}
+    fn to_proto(&self, poly_ctx: &crate::PolyContext<'_>) -> proto::Poly {
+        let bytes = izip!(self.coefficients.outer_iter(), poly_ctx.iter_moduli_ops())
+            .map(|(xi, modqi)| convert_to_bytes(xi.as_slice().unwrap(), modqi.modulus()))
+            .collect_vec();
+        let mut repr = proto::Representation::Unknown;
+        if self.representation == Representation::Coefficient {
+            repr = proto::Representation::Coefficient;
+        } else if self.representation == Representation::Evaluation {
+            repr = proto::Representation::Evaluation;
+        }
+
+        proto::Poly {
+            coefficients: bytes,
+            representation: repr.into(),
+        }
+    }
+
+    fn from_proto_with_context(
+        proto_poly: &proto::Poly,
+        poly_ctx: &crate::PolyContext<'_>,
+    ) -> Poly {
+        let coefficients = izip!(proto_poly.coefficients.iter(), poly_ctx.iter_moduli_ops())
+            .flat_map(|(xi, modqi)| {
+                let values = convert_from_bytes(xi, modqi.modulus());
+                assert!(values.len() == poly_ctx.degree());
+                values
+            })
+            .collect_vec();
+        let coefficients =
+            Array2::from_shape_vec((poly_ctx.moduli_count(), poly_ctx.degree()), coefficients)
+                .unwrap();
+
+        let mut representation = Representation::Unknown;
+        if proto_poly.representation == proto::Representation::Coefficient.into() {
+            representation = Representation::Coefficient;
+        } else if proto_poly.representation == proto::Representation::Evaluation.into() {
+            representation = Representation::Evaluation;
+        }
+
+        Poly {
+            coefficients,
+            representation,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::BfvParameters;
+    use prost::Message;
+    use rand::thread_rng;
+
+    #[test]
+    fn serialization_and_deserialization() {
+        let params = BfvParameters::default(3, 1 << 15);
+        let ctx = params.poly_ctx(&crate::PolyType::Q, 0);
+
+        let mut rng = thread_rng();
+        let poly = ctx.random(Representation::Coefficient, &mut rng);
+        let proto = poly.to_proto(&ctx);
+        let bytes = proto.encode_to_vec();
+        dbg!(bytes.len());
+        let poly_back = Poly::from_proto_with_context(&proto, &ctx);
+
+        assert_eq!(poly, poly_back);
+    }
 }
