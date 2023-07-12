@@ -7,6 +7,7 @@ mod nb_theory;
 mod parameters;
 mod plaintext;
 mod poly;
+mod proto;
 mod relinearization_key;
 mod secret_key;
 mod utils;

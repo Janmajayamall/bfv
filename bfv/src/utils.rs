@@ -53,8 +53,107 @@ pub fn mod_inverse_biguint(a: &BigUint, m: &BigUint) -> BigUint {
     )
 }
 
+pub fn convert_to_bytes(values: &[u64], modulus: u64) -> Vec<u8> {
+    let bits = 64 - modulus.leading_zeros();
+    let mask = (1 << bits) - 1;
+
+    let bytes_count = ((bits as usize * values.len()) as f64 / 8.0).ceil() as usize;
+    let mut bytes = Vec::with_capacity(bytes_count);
+
+    let mut value_index = 0;
+
+    let mut curr_val = values[value_index] & mask;
+    let mut curr_val_left = bits;
+
+    loop {
+        if curr_val_left < 8 {
+            // extract left over bits in curr_val
+            let mut byte = (curr_val & ((1 << curr_val_left) - 1)) as u8;
+
+            value_index += 1;
+
+            if value_index != values.len() {
+                curr_val = values[value_index] & mask;
+                let left_over_space = 8 - curr_val_left;
+
+                // extract bits equivalent to space left in byte and set them in byte
+                byte |= ((curr_val & ((1 << left_over_space) - 1)) as u8) << curr_val_left;
+
+                curr_val_left = bits - left_over_space;
+                curr_val >>= left_over_space;
+                bytes.push(byte);
+            } else {
+                // since curr_val is last, push the extracted bits
+                bytes.push(byte);
+                break;
+            }
+        } else {
+            // extract a byte at once
+            let byte = (curr_val & ((1 << 8) - 1)) as u8;
+            bytes.push(byte);
+
+            curr_val >>= 8;
+            curr_val_left -= 8;
+        }
+    }
+
+    bytes
+}
+
+pub fn convert_from_bytes(bytes: &[u8], modulus: u64) -> Vec<u64> {
+    let bits = 64 - modulus.leading_zeros();
+
+    let values_count = (bytes.len() * 8) / bits as usize;
+    let mut values = Vec::with_capacity(values_count);
+    let mut byte_index = 0;
+    let mut curr_value_fill = 0;
+    let mut curr_value = 0u64;
+
+    let mut value_index = 0;
+
+    loop {
+        if bits - curr_value_fill < 8 {
+            let left_over_bits = bits - curr_value_fill;
+            let mut b = bytes[byte_index] as u64;
+
+            // extract left over bits and set them in their position in current value
+            curr_value |= ((b & ((1 << left_over_bits) - 1)) << curr_value_fill);
+            // curr_val is filled
+            values.push(curr_value);
+            value_index += 1;
+
+            curr_value = 0;
+            curr_value_fill = 0;
+
+            // lose left_over_bits
+            b >>= left_over_bits;
+
+            // `8 - let_over_bits` are for the next value
+            curr_value |= b;
+
+            if value_index != values_count {
+                curr_value_fill += 8 - left_over_bits;
+            } else {
+                assert!(byte_index + 1 == bytes.len());
+                break;
+            }
+        } else {
+            curr_value |= ((bytes[byte_index] as u64) << curr_value_fill);
+            curr_value_fill += 8;
+        }
+
+        byte_index += 1;
+    }
+
+    values
+}
+
 #[cfg(test)]
 mod tests {
+    use rand::thread_rng;
+
+    use crate::generate_prime;
+
     use super::*;
 
     #[test]
@@ -64,5 +163,20 @@ mod tests {
             v.push(rot_to_galois_element(i, 8));
         }
         dbg!(v);
+    }
+
+    #[test]
+    fn convert_to_and_from_bytes() {
+        for prime_bits in [17, 43, 50, 59] {
+            let prime = generate_prime(prime_bits, 16, 1 << prime_bits).unwrap();
+            let modq = Modulus::new(prime);
+
+            let mut rng = thread_rng();
+            let values = modq.random_vec(1 << 8, &mut rng);
+
+            let bytes = convert_to_bytes(&values, modq.modulus());
+            let values_res = convert_from_bytes(&bytes, modq.modulus());
+            assert_eq!(values, values_res);
+        }
     }
 }

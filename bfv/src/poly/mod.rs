@@ -1,3 +1,4 @@
+use crate::proto;
 use itertools::Itertools;
 use ndarray::Array2;
 pub mod poly_context;
@@ -52,12 +53,10 @@ impl Substitution {
     }
 }
 
-/// Should only be concerned with polynomial operations.
-/// This mean don't store any BFV related pre-computation here
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Poly {
-    pub coefficients: Array2<u64>,
-    pub representation: Representation,
+    pub(crate) coefficients: Array2<u64>,
+    pub(crate) representation: Representation,
 }
 
 impl Poly {
@@ -74,4 +73,8 @@ impl Poly {
             representation: Representation::Unknown,
         }
     }
+}
+
+impl Poly {
+    // fn to_proto(&self, poly_ctx: crate::PolyContext<'_>) -> proto::Poly {}
 }

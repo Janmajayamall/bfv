@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+enum Representation { 
+    Unknown = 0;
+    Coefficient = 1;
+    Evaluation = 2;
+}
+
+message Poly { 
+    repeated bytes coefficients = 1; 
+    Representation representation = 2;
+}
