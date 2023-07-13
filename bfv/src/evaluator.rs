@@ -333,6 +333,7 @@ impl Evaluator {
         c0.c_ref_mut().iter_mut().for_each(|p| {
             ctx.add_assign(p, &noise_poly);
         });
+        c0.seed = None;
     }
 }
 

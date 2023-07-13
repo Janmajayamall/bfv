@@ -6,7 +6,8 @@ use itertools::{izip, Itertools};
 use ndarray::{azip, s, Array2, ArrayView2, Axis, IntoNdProducer};
 use num_bigint::BigUint;
 use num_traits::{identities::One, ToPrimitive, Zero};
-use rand::{CryptoRng, RngCore};
+use rand::{CryptoRng, RngCore, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 use seq_macro::seq;
 use std::mem::{self, MaybeUninit};
 use traits::Ntt;
@@ -90,6 +91,26 @@ where
                     .as_slice_mut()
                     .unwrap()
                     .copy_from_slice(q.random_vec(self.degree, rng).as_slice());
+            },
+        );
+        poly
+    }
+
+    /// Generates a random polynomial from seed.
+    ///
+    /// Seeded polynomials must always be in `Coefficient` representation. This is necessary
+    /// to support serialization/deserialization of polynomials while being able to use
+    /// different `Ntt` backends, since `Evaluation` form of same polynomial can differ
+    /// on different `Ntt` operators.
+    pub fn random_with_seed(&self, seed: <ChaCha8Rng as SeedableRng>::Seed) -> Poly {
+        let mut rng = ChaCha8Rng::from_seed(seed);
+        let mut poly = self.zero(Representation::Coefficient);
+        izip!(poly.coefficients.outer_iter_mut(), self.iter_moduli_ops()).for_each(
+            |(mut coefficients, q)| {
+                coefficients
+                    .as_slice_mut()
+                    .unwrap()
+                    .copy_from_slice(q.random_vec(self.degree, &mut rng).as_slice());
             },
         );
         poly

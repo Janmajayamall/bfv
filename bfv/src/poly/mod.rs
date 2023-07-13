@@ -96,16 +96,9 @@ impl<'a> TryFromWithPolyContext<'a> for Poly {
             Array2::from_shape_vec((poly_ctx.moduli_count(), poly_ctx.degree()), coefficients)
                 .unwrap();
 
-        let mut representation = Representation::Unknown;
-        if poly.representation == proto::Representation::Coefficient.into() {
-            representation = Representation::Coefficient;
-        } else if poly.representation == proto::Representation::Evaluation.into() {
-            representation = Representation::Evaluation;
-        }
-
         Poly {
             coefficients,
-            representation,
+            representation: Representation::Coefficient,
         }
     }
 }
@@ -115,19 +108,14 @@ impl<'a> TryFromWithPolyContext<'a> for proto::Poly {
     type PolyContext = crate::PolyContext<'a>;
 
     fn try_from_with_context(poly: &Self::Value, poly_ctx: &'a Self::PolyContext) -> Self {
+        assert!(poly.representation == Representation::Coefficient);
+
         let bytes = izip!(poly.coefficients.outer_iter(), poly_ctx.iter_moduli_ops())
             .map(|(xi, modqi)| convert_to_bytes(xi.as_slice().unwrap(), modqi.modulus()))
             .collect_vec();
-        let mut repr = proto::Representation::Unknown;
-        if poly.representation == Representation::Coefficient {
-            repr = proto::Representation::Coefficient;
-        } else if poly.representation == Representation::Evaluation {
-            repr = proto::Representation::Evaluation;
-        }
 
         proto::Poly {
             coefficients: bytes,
-            representation: repr.into(),
         }
     }
 }

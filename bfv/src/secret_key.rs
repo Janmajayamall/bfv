@@ -3,7 +3,8 @@ use crate::{BfvParameters, Ciphertext, PolyType};
 use crate::{Poly, PolyContext, Representation};
 use itertools::Itertools;
 use rand::distributions::{Distribution, Uniform};
-use rand::{CryptoRng, RngCore};
+use rand::{CryptoRng, RngCore, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
 pub struct SecretKey {
     pub(crate) coefficients: Box<[i64]>,
@@ -60,10 +61,19 @@ impl SecretKey {
         let mut sk_poly = self.to_poly(&ctx);
 
         let m = pt.to_poly(params, Representation::Evaluation);
-        let mut a = ctx.random(Representation::Evaluation, rng);
+
+        // seed `a`
+        let mut seed = <ChaCha8Rng as SeedableRng>::Seed::default();
+        rng.fill_bytes(&mut seed);
+        // Since `Ciphertext` defaults to `Coefficient` representation and `a` is
+        // part of `Ciphertext`, we clone and change clone's representation to `Evaluation`
+        // in order to avoid another Ntt operation later.
+        let mut a = ctx.random_with_seed(seed);
+        let mut a_eval = a.clone();
+        ctx.change_representation(&mut a_eval, Representation::Evaluation);
 
         // sk*a
-        ctx.mul_assign(&mut sk_poly, &a);
+        ctx.mul_assign(&mut sk_poly, &a_eval);
 
         let mut e = ctx.random_gaussian(Representation::Coefficient, 10, rng);
         ctx.change_representation(&mut e, Representation::Evaluation);
@@ -74,12 +84,12 @@ impl SecretKey {
         ctx.sub_assign(&mut e, &sk_poly);
 
         ctx.change_representation(&mut e, Representation::Coefficient);
-        ctx.change_representation(&mut a, Representation::Coefficient);
 
         Ciphertext {
             c: vec![e, a],
             poly_type: PolyType::Q,
             level: encoding.level,
+            seed: Some(seed),
         }
     }
 
