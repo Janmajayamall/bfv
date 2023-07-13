@@ -1,7 +1,10 @@
+use std::default;
+
 use crate::modulus::Modulus;
 use crate::{mod_inverse_biguint, mod_inverse_biguint_u64};
 use crate::{
-    secret_key::SecretKey, HybridKeySwitchingParameters, Poly, PolyContext, Representation,
+    proto, secret_key::SecretKey, traits::TryFromWithPolyContext, HybridKeySwitchingParameters,
+    Poly, PolyContext, Representation,
 };
 use crypto_bigint::rand_core::CryptoRngCore;
 use itertools::{izip, Itertools};
@@ -134,9 +137,10 @@ impl BVKeySwitchingKey {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct HybridKeySwitchingKey {
     // ksk_ctx is q_ctx
-    seed: <ChaCha8Rng as SeedableRng>::Seed,
+    seed: Option<<ChaCha8Rng as SeedableRng>::Seed>,
 
     c0s: Box<[Poly]>,
     c1s: Box<[Poly]>,
@@ -161,7 +165,7 @@ impl HybridKeySwitchingKey {
         let c0s = Self::generate_c0(&qp_ctx, &c1s, &ksk_params.g, &poly, &sk, rng);
 
         HybridKeySwitchingKey {
-            seed,
+            seed: Some(seed),
             c0s: c0s.into_boxed_slice(),
             c1s: c1s.into_boxed_slice(),
         }
@@ -387,11 +391,76 @@ impl HybridKeySwitchingKey {
     }
 }
 
+impl<'a> TryFromWithPolyContext<'a> for proto::HybridKeySwitchingKey {
+    type PolyContext = PolyContext<'a>;
+    type Value = HybridKeySwitchingKey;
+    fn try_from_with_context(value: &Self::Value, poly_ctx: &'a Self::PolyContext) -> Self {
+        let c0s = value
+            .c0s
+            .iter()
+            .map(|p| proto::Poly::try_from_with_context(p, &poly_ctx))
+            .collect_vec();
+
+        let c1s = {
+            if value.seed.is_none() {
+                value
+                    .c1s
+                    .iter()
+                    .map(|p| proto::Poly::try_from_with_context(p, &poly_ctx))
+                    .collect_vec()
+            } else {
+                vec![]
+            }
+        };
+
+        let seed = value.seed.and_then(|s| Some(s.to_vec()));
+
+        proto::HybridKeySwitchingKey { c0s, c1s, seed }
+    }
+}
+
+impl<'a> TryFromWithPolyContext<'a> for HybridKeySwitchingKey {
+    type PolyContext = PolyContext<'a>;
+    type Value = proto::HybridKeySwitchingKey;
+    fn try_from_with_context(value: &Self::Value, poly_ctx: &'a Self::PolyContext) -> Self {
+        let c0s = value
+            .c0s
+            .iter()
+            .map(|p| Poly::try_from_with_context(p, &poly_ctx))
+            .collect_vec();
+
+        let (c1s, seed) = {
+            if value.seed.is_none() {
+                assert!(value.c1s.len() == value.c0s.len());
+                let c = value
+                    .c1s
+                    .iter()
+                    .map(|p| Poly::try_from_with_context(p, &poly_ctx))
+                    .collect_vec();
+                (c, None)
+            } else {
+                assert!(value.seed.is_some());
+                let mut seed = <ChaCha8Rng as SeedableRng>::Seed::default();
+                seed.copy_from_slice(value.seed());
+                let c = HybridKeySwitchingKey::generate_c1(c0s.len(), poly_ctx, seed);
+                (c, Some(seed))
+            }
+        };
+
+        HybridKeySwitchingKey {
+            seed,
+            c0s: c0s.into_boxed_slice(),
+            c1s: c1s.into_boxed_slice(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::parameters::{BfvParameters, PolyType};
     use num_bigint::BigUint;
+    use prost::Message;
     use rand::thread_rng;
 
     #[test]
@@ -471,5 +540,28 @@ mod tests {
             let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.big_q() - v).bits());
             dbg!(&diff_bits);
         });
+    }
+
+    #[test]
+    fn serialize_and_deserialize_hybrid_ksk() {
+        let params = BfvParameters::default(15, 1 << 15);
+        let qp_ctx = params.poly_ctx(&PolyType::QP, 0);
+        let ksk_ctx = params.poly_ctx(&PolyType::Q, 0);
+
+        let mut rng = thread_rng();
+        let poly = ksk_ctx.random(Representation::Evaluation, &mut rng);
+        let sk = SecretKey::random(params.degree, &mut rng);
+        let ksk = HybridKeySwitchingKey::new(
+            params.hybrid_key_switching_params_at_level(0),
+            &poly,
+            &sk,
+            &qp_ctx,
+            &mut rng,
+        );
+
+        let ksk_proto = proto::HybridKeySwitchingKey::try_from_with_context(&ksk, &qp_ctx);
+        let ksk_back = HybridKeySwitchingKey::try_from_with_context(&ksk_proto, &qp_ctx);
+
+        assert_eq!(ksk, ksk_back);
     }
 }

@@ -15,3 +15,30 @@ message Ciphertext {
     repeated Poly c = 1;
     uint32 level = 2;
 }
+
+message HybridKeySwitchingKey { 
+    repeated Poly c0s = 1;
+    // repeated is already optional
+    repeated Poly c1s = 2;
+    optional bytes seed = 3;
+}
+
+message RelinearizationKey { 
+    HybridKeySwitchingKey ksk = 1;
+    uint32 level = 2;
+}
+
+message GaloisKey { 
+    uint32 exponent = 1;
+    HybridKeySwitchingKey ksk = 2;
+    uint32 level = 3;
+}
+
+message EvaluationKey { 
+    // RelinearizartionKeys and GaliosKeys are stored in arbitrary order. 
+    // This means that if there are two instances of EvaluationKey both with 
+    // same rlks and rtgs, their bytes might not exactly match.
+    repeated RelinearizationKey rlks = 1;
+    repeated GaloisKey rtgs = 2;
+    repeated int32 rot_indices = 3;
+}

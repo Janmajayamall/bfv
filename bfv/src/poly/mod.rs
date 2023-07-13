@@ -13,12 +13,12 @@ pub enum Representation {
     Unknown,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Substitution {
-    exponent: usize,
-    power_bitrev: Box<[usize]>,
-    bit_rev: Box<[usize]>,
-    degree: usize,
+    pub(crate) exponent: usize,
+    pub(crate) power_bitrev: Box<[usize]>,
+    pub(crate) bit_rev: Box<[usize]>,
+    pub(crate) degree: usize,
 }
 
 impl Substitution {
@@ -81,10 +81,10 @@ impl Poly {
 }
 
 impl<'a> TryFromWithPolyContext<'a> for Poly {
-    type Poly = proto::Poly;
+    type Value = proto::Poly;
     type PolyContext = crate::PolyContext<'a>;
 
-    fn try_from_with_context(poly: &Self::Poly, poly_ctx: &'a Self::PolyContext) -> Self {
+    fn try_from_with_context(poly: &Self::Value, poly_ctx: &'a Self::PolyContext) -> Self {
         let coefficients = izip!(poly.coefficients.iter(), poly_ctx.iter_moduli_ops())
             .flat_map(|(xi, modqi)| {
                 let values = convert_from_bytes(xi, modqi.modulus());
@@ -111,10 +111,10 @@ impl<'a> TryFromWithPolyContext<'a> for Poly {
 }
 
 impl<'a> TryFromWithPolyContext<'a> for proto::Poly {
-    type Poly = Poly;
+    type Value = Poly;
     type PolyContext = crate::PolyContext<'a>;
 
-    fn try_from_with_context(poly: &Self::Poly, poly_ctx: &'a Self::PolyContext) -> Self {
+    fn try_from_with_context(poly: &Self::Value, poly_ctx: &'a Self::PolyContext) -> Self {
         let bytes = izip!(poly.coefficients.outer_iter(), poly_ctx.iter_moduli_ops())
             .map(|(xi, modqi)| convert_to_bytes(xi.as_slice().unwrap(), modqi.modulus()))
             .collect_vec();
