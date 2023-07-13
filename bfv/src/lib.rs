@@ -1,3 +1,4 @@
+mod ciphertext;
 mod evaluation_key;
 mod evaluator;
 mod galois_key;
@@ -10,8 +11,10 @@ mod poly;
 mod proto;
 mod relinearization_key;
 mod secret_key;
+mod traits;
 mod utils;
 
+pub use ciphertext::*;
 pub use evaluation_key::*;
 pub use evaluator::*;
 pub use galois_key::*;

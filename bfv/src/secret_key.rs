@@ -1,6 +1,5 @@
-use crate::evaluator::Ciphertext;
 use crate::plaintext::{Encoding, Plaintext};
-use crate::{BfvParameters, PolyType};
+use crate::{BfvParameters, Ciphertext, PolyType};
 use crate::{Poly, PolyContext, Representation};
 use itertools::Itertools;
 use rand::distributions::{Distribution, Uniform};

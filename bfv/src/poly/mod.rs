@@ -1,4 +1,5 @@
-use crate::{convert_from_bytes, convert_to_bytes, proto};
+use crate::{convert_from_bytes, convert_to_bytes, proto, traits::TryFromWithPolyContext};
+use fhe_math::zq::ntt::NttOperator;
 use itertools::{izip, Itertools};
 use ndarray::Array2;
 pub mod poly_context;
@@ -79,29 +80,12 @@ impl Poly {
     }
 }
 
-impl Poly {
-    fn to_proto(&self, poly_ctx: &crate::PolyContext<'_>) -> proto::Poly {
-        let bytes = izip!(self.coefficients.outer_iter(), poly_ctx.iter_moduli_ops())
-            .map(|(xi, modqi)| convert_to_bytes(xi.as_slice().unwrap(), modqi.modulus()))
-            .collect_vec();
-        let mut repr = proto::Representation::Unknown;
-        if self.representation == Representation::Coefficient {
-            repr = proto::Representation::Coefficient;
-        } else if self.representation == Representation::Evaluation {
-            repr = proto::Representation::Evaluation;
-        }
+impl<'a> TryFromWithPolyContext<'a> for Poly {
+    type Poly = proto::Poly;
+    type PolyContext = crate::PolyContext<'a>;
 
-        proto::Poly {
-            coefficients: bytes,
-            representation: repr.into(),
-        }
-    }
-
-    fn from_proto_with_context(
-        proto_poly: &proto::Poly,
-        poly_ctx: &crate::PolyContext<'_>,
-    ) -> Poly {
-        let coefficients = izip!(proto_poly.coefficients.iter(), poly_ctx.iter_moduli_ops())
+    fn try_from_with_context(poly: &Self::Poly, poly_ctx: &'a Self::PolyContext) -> Self {
+        let coefficients = izip!(poly.coefficients.iter(), poly_ctx.iter_moduli_ops())
             .flat_map(|(xi, modqi)| {
                 let values = convert_from_bytes(xi, modqi.modulus());
                 assert!(values.len() == poly_ctx.degree());
@@ -113,15 +97,37 @@ impl Poly {
                 .unwrap();
 
         let mut representation = Representation::Unknown;
-        if proto_poly.representation == proto::Representation::Coefficient.into() {
+        if poly.representation == proto::Representation::Coefficient.into() {
             representation = Representation::Coefficient;
-        } else if proto_poly.representation == proto::Representation::Evaluation.into() {
+        } else if poly.representation == proto::Representation::Evaluation.into() {
             representation = Representation::Evaluation;
         }
 
         Poly {
             coefficients,
             representation,
+        }
+    }
+}
+
+impl<'a> TryFromWithPolyContext<'a> for proto::Poly {
+    type Poly = Poly;
+    type PolyContext = crate::PolyContext<'a>;
+
+    fn try_from_with_context(poly: &Self::Poly, poly_ctx: &'a Self::PolyContext) -> Self {
+        let bytes = izip!(poly.coefficients.outer_iter(), poly_ctx.iter_moduli_ops())
+            .map(|(xi, modqi)| convert_to_bytes(xi.as_slice().unwrap(), modqi.modulus()))
+            .collect_vec();
+        let mut repr = proto::Representation::Unknown;
+        if poly.representation == Representation::Coefficient {
+            repr = proto::Representation::Coefficient;
+        } else if poly.representation == Representation::Evaluation {
+            repr = proto::Representation::Evaluation;
+        }
+
+        proto::Poly {
+            coefficients: bytes,
+            representation: repr.into(),
         }
     }
 }
@@ -140,10 +146,10 @@ mod tests {
 
         let mut rng = thread_rng();
         let poly = ctx.random(Representation::Coefficient, &mut rng);
-        let proto = poly.to_proto(&ctx);
+        let proto = proto::Poly::try_from_with_context(&poly, &ctx);
         let bytes = proto.encode_to_vec();
         dbg!(bytes.len());
-        let poly_back = Poly::from_proto_with_context(&proto, &ctx);
+        let poly_back = Poly::try_from_with_context(&proto, &ctx);
 
         assert_eq!(poly, poly_back);
     }

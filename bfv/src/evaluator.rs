@@ -1,52 +1,11 @@
 use crate::relinearization_key::RelinearizationKey;
-use crate::{BfvParameters, EvaluationKey, PolyType};
+use crate::{BfvParameters, Ciphertext, EvaluationKey, PolyType};
 use crate::{Encoding, GaloisKey, Plaintext, SecretKey};
 use crate::{Poly, Representation};
 use itertools::{izip, Itertools};
 use num_bigint::{BigUint, RandBigInt};
 use rand::{thread_rng, CryptoRng, Rng, RngCore};
 use std::collections::HashMap;
-
-#[derive(Debug, Clone)]
-pub struct Ciphertext {
-    pub(crate) c: Vec<Poly>,
-    pub(crate) poly_type: PolyType,
-    pub(crate) level: usize,
-}
-
-impl Ciphertext {
-    pub fn new(c: Vec<Poly>, poly_type: PolyType, level: usize) -> Ciphertext {
-        Ciphertext {
-            c,
-            poly_type,
-            level,
-        }
-    }
-
-    pub fn placeholder() -> Ciphertext {
-        Ciphertext {
-            c: vec![],
-            poly_type: PolyType::Q,
-            level: 0,
-        }
-    }
-
-    pub fn c_ref_mut(&mut self) -> &mut [Poly] {
-        &mut self.c
-    }
-
-    pub fn c_ref(&self) -> &[Poly] {
-        &self.c
-    }
-
-    pub fn poly_type(&self) -> PolyType {
-        self.poly_type.clone()
-    }
-
-    pub fn level(&self) -> usize {
-        self.level
-    }
-}
 
 pub struct Evaluator {
     pub(crate) params: BfvParameters,

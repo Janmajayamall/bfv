@@ -10,3 +10,8 @@ message Poly {
     repeated bytes coefficients = 1; 
     Representation representation = 2;
 }
+
+message Ciphertext { 
+    repeated Poly c = 1;
+    uint32 level = 2;
+}
