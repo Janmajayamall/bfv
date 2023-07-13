@@ -67,6 +67,7 @@ impl RelinearizationKey {
             c: vec![cs0, cs1],
             poly_type: PolyType::Q,
             level: ct.level,
+            seed: None,
         }
     }
 }
@@ -80,7 +81,7 @@ impl TryFromWithParameters for proto::RelinearizationKey {
 
         // message types default to optional in proto3. For more info check this
         // answer https://github.com/tokio-rs/prost/discussions/679 and the one linked in it.
-        // This enforced by proto3 not something prost does.
+        // This is enforced by proto3, not something prost does.
         let ksk = Some(proto::HybridKeySwitchingKey::try_from_with_context(
             &value.ksk, &ctx,
         ));

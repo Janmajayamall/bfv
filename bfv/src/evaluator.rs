@@ -5,7 +5,6 @@ use crate::{Poly, Representation};
 use itertools::{izip, Itertools};
 use num_bigint::{BigUint, RandBigInt};
 use rand::{thread_rng, CryptoRng, Rng, RngCore};
-use std::collections::HashMap;
 
 pub struct Evaluator {
     pub(crate) params: BfvParameters,
@@ -137,6 +136,7 @@ impl Evaluator {
             c: vec![c_r0, c00, c01],
             poly_type: PolyType::PQ,
             level: level,
+            seed: None,
         }
     }
 
@@ -168,6 +168,7 @@ impl Evaluator {
             c,
             poly_type: PolyType::Q,
             level,
+            seed: None,
         }
     }
 
@@ -192,6 +193,7 @@ impl Evaluator {
         izip!(c0.c.iter_mut(), c1.c.iter()).for_each(|(p0, p1)| {
             ctx.add_assign(p0, p1);
         });
+        c0.seed = None;
     }
 
     pub fn add(&self, c0: &Ciphertext, c1: &Ciphertext) -> Ciphertext {
@@ -205,6 +207,7 @@ impl Evaluator {
             c,
             poly_type: c0.poly_type.clone(),
             level: c0.level,
+            seed: None,
         }
     }
 
@@ -215,6 +218,7 @@ impl Evaluator {
         izip!(c0.c.iter_mut(), c1.c.iter()).for_each(|(p0, p1)| {
             ctx.sub_assign(p0, p1);
         });
+        c0.seed = None;
     }
 
     pub fn sub(&self, c0: &Ciphertext, c1: &Ciphertext) -> Ciphertext {
@@ -228,6 +232,7 @@ impl Evaluator {
             c,
             poly_type: c0.poly_type.clone(),
             level: c0.level,
+            seed: None,
         }
     }
 
@@ -237,11 +242,15 @@ impl Evaluator {
         izip!(c0.c.iter_mut(), c1.c.iter()).for_each(|(p0, p1)| {
             ctx.add_assign(p0, &ctx.mul(p1, poly));
         });
+
+        c0.seed = None;
     }
 
     pub fn mul_poly_assign(&self, c0: &mut Ciphertext, poly: &Poly) {
         let ctx = self.params.poly_ctx(&c0.poly_type, c0.level);
         c0.c.iter_mut().for_each(|p0| ctx.mul_assign(p0, poly));
+
+        c0.seed = None;
     }
 
     pub fn mul_poly(&self, c0: &Ciphertext, poly: &Poly) -> Ciphertext {
@@ -251,6 +260,7 @@ impl Evaluator {
             c,
             poly_type: c0.poly_type.clone(),
             level: c0.level,
+            seed: None,
         }
     }
 
@@ -259,6 +269,8 @@ impl Evaluator {
         let ctx = self.params.poly_ctx(&c0.poly_type, c0.level);
         ctx.sub_reversed_inplace(&mut c0.c[0], &poly);
         ctx.neg_assign(&mut c0.c[1]);
+
+        c0.seed = None;
     }
 
     pub fn mod_down_next(&self, c0: &mut Ciphertext) {
@@ -269,6 +281,8 @@ impl Evaluator {
             ctx.mod_down_next(p, &self.params.lastq_inv_modql[level]);
         });
         c0.level = level + 1;
+
+        c0.seed = None;
     }
 
     pub fn mod_down_level(&self, c0: &mut Ciphertext, level: usize) {

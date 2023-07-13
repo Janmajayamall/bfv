@@ -1,4 +1,6 @@
 use itertools::Itertools;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 
 use crate::{
     proto,
@@ -10,6 +12,7 @@ use crate::{
 pub struct Ciphertext {
     pub(crate) c: Vec<Poly>,
     pub(crate) poly_type: PolyType,
+    pub(crate) seed: Option<<ChaCha8Rng as SeedableRng>::Seed>,
     pub(crate) level: usize,
 }
 
@@ -19,6 +22,7 @@ impl Ciphertext {
             c,
             poly_type,
             level,
+            seed: None,
         }
     }
 
@@ -27,6 +31,7 @@ impl Ciphertext {
             c: vec![],
             poly_type: PolyType::Q,
             level: 0,
+            seed: None,
         }
     }
 

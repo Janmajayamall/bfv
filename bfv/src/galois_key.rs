@@ -85,6 +85,7 @@ impl GaloisKey {
             c: vec![cs0, cs1],
             poly_type: PolyType::Q,
             level,
+            seed: None,
         }
     }
 }
