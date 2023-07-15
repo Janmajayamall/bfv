@@ -136,6 +136,10 @@ impl Plaintext {
     pub fn poly_ntt_ref(&self) -> &Poly {
         self.poly_ntt.as_ref().expect("Missing poly ntt")
     }
+
+    pub fn move_poly_ntt(self) -> Poly {
+        self.poly_ntt.expect("Missing poly ntt")
+    }
 }
 
 #[cfg(test)]

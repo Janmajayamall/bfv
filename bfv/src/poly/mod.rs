@@ -75,8 +75,16 @@ impl Poly {
         }
     }
 
-    pub fn coefficients_ref(&self) -> &Array2<u64> {
+    pub fn coefficients(&self) -> &Array2<u64> {
         &self.coefficients
+    }
+
+    pub fn coefficients_mut(&mut self) -> &mut Array2<u64> {
+        &mut self.coefficients
+    }
+
+    pub fn representation(&self) -> &Representation {
+        &self.representation
     }
 }
 
