@@ -409,7 +409,7 @@ impl Modulus {
         });
 
         #[cfg(feature = "hexl")]
-        hexl_rs::elem_reduce_mod(a, self.modulus, a.len() as u64, 2, 1);
+        hexl_rs::elem_reduce_mod(a, self.modulus, a.len() as u64, self.modulus, 1);
     }
 
     pub fn reduce_naive_vec(&self, a: &mut [u64]) {
