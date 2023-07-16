@@ -417,7 +417,9 @@ mod tests {
     #[test]
     fn test_rotations() {
         let mut rng = thread_rng();
-        let params = BfvParameters::default(3, 1 << 4);
+        // let params = BfvParameters::default(15, 1 << 15);
+        let mut params = BfvParameters::new(&[50; 15], 65537, 1 << 15);
+        params.enable_hybrid_key_switching(&[50, 50, 50]);
 
         // gen keys
         let sk = SecretKey::random(params.degree, &mut rng);
@@ -435,12 +437,13 @@ mod tests {
         // let ct_rotated = evaluator.rotate(&ct0, 1, &ek);
 
         let mut c = ct0.clone();
-        for _ in 0..1 {
+        for i in 0..250 {
             let tmp = evaluator.rotate(&c, 1, &ek);
             c = tmp;
+            println!("Noise {i}: {}", evaluator.measure_noise(&sk, &c,));
         }
 
-        println!("Noise: {}", evaluator.measure_noise(&sk, &c,));
+        // println!("Noise: {}", evaluator.measure_noise(&sk, &c,));
 
         // decrypt ct01
         // let res_m =

@@ -161,6 +161,7 @@ impl HybridKeySwitchingKey {
         poly: &Poly,
         sk: &SecretKey,
         qp_ctx: &PolyContext<'_>,
+        variance: usize,
         rng: &mut R,
     ) -> HybridKeySwitchingKey {
         let mut seed = <ChaCha8Rng as SeedableRng>::Seed::default();
@@ -173,7 +174,7 @@ impl HybridKeySwitchingKey {
             qp_ctx.change_representation(p, Representation::Evaluation);
         });
 
-        let c0s = Self::generate_c0(&qp_ctx, &c1s, &ksk_params.g, &poly, &sk, rng);
+        let c0s = Self::generate_c0(&qp_ctx, &c1s, &ksk_params.g, &poly, &sk, variance, rng);
 
         HybridKeySwitchingKey {
             seed: Some(seed),
@@ -324,6 +325,7 @@ impl HybridKeySwitchingKey {
         g: &[BigUint],
         poly: &Poly,
         sk: &SecretKey,
+        variance: usize,
         rng: &mut R,
     ) -> Vec<Poly> {
         //TODO: check poly is of correct context
@@ -338,7 +340,7 @@ impl HybridKeySwitchingKey {
         let c0s = izip!(c1s.iter(), g)
             .map(|(c1, g_part)| {
                 let mut c0 = qp_ctx.zero(Representation::Evaluation);
-                let mut e = qp_ctx.random_gaussian(Representation::Coefficient, 10, rng);
+                let mut e = qp_ctx.random_gaussian(Representation::Coefficient, variance, rng);
                 qp_ctx.change_representation(&mut e, Representation::Evaluation);
 
                 // Q
@@ -539,19 +541,16 @@ mod tests {
         let ksk_ctx = params.poly_ctx(&PolyType::Q, 0);
         let specialp_ctx = params.poly_ctx(&PolyType::SpecialP, 0);
         let qp_ctx = params.poly_ctx(&PolyType::QP, 0);
-        let ksk_params = HybridKeySwitchingParameters::new(
-            &ksk_ctx,
-            &specialp_ctx,
-            params.alpha,
-            params.aux_bits,
-        );
+        let ksk_params =
+            HybridKeySwitchingParameters::new(&ksk_ctx, &specialp_ctx, params.alpha.unwrap());
         let mut rng = thread_rng();
 
         let sk = SecretKey::random(params.degree, &mut rng);
 
         let poly = ksk_ctx.random(Representation::Evaluation, &mut rng);
 
-        let ksk = HybridKeySwitchingKey::new(&ksk_params, &poly, &sk, &qp_ctx, &mut rng);
+        let ksk =
+            HybridKeySwitchingKey::new(&ksk_params, &poly, &sk, &qp_ctx, params.variance, &mut rng);
 
         let mut other_poly = ksk_ctx.random(Representation::Coefficient, &mut rng);
         let now = std::time::Instant::now();
@@ -590,6 +589,7 @@ mod tests {
             &poly,
             &sk,
             &qp_ctx,
+            params.variance,
             &mut rng,
         );
 

@@ -34,6 +34,7 @@ impl RelinearizationKey {
             &sk_sq,
             sk,
             &qp_ctx,
+            params.variance,
             rng,
         );
 

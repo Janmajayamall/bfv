@@ -75,7 +75,7 @@ impl SecretKey {
         // sk*a
         ctx.mul_assign(&mut sk_poly, &a_eval);
 
-        let mut e = ctx.random_gaussian(Representation::Coefficient, 10, rng);
+        let mut e = ctx.random_gaussian(Representation::Coefficient, params.variance, rng);
         ctx.change_representation(&mut e, Representation::Evaluation);
 
         // e + m

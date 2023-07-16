@@ -39,6 +39,7 @@ impl GaloisKey {
             &sk_poly,
             &sk,
             &qp_ctx,
+            params.variance,
             rng,
         );
 

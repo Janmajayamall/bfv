@@ -29,6 +29,8 @@ pub struct BfvParameters<T: Ntt> {
     pub ciphertext_moduli_sizes: Vec<usize>,
     pub max_level: usize,
 
+    pub variance: usize,
+
     pub plaintext_modulus: u64,
     pub plaintext_modulus_op: Modulus,
     pub plaintext_ntt_op: T,
@@ -83,12 +85,11 @@ pub struct BfvParameters<T: Ntt> {
     pub alphal_modpl: Vec<Array2<u64>>,
 
     // Hybrid key switching
-    pub special_moduli: Vec<u64>,
-    pub special_moduli_ops: Vec<Modulus>,
-    pub special_moduli_ntt_ops: Vec<T>,
-    pub dnum: usize,
-    pub alpha: usize, // fixed to 3
-    pub aux_bits: usize,
+    pub special_moduli: Option<Vec<u64>>,
+    pub special_moduli_ops: Option<Vec<Modulus>>,
+    pub special_moduli_ntt_ops: Option<Vec<T>>,
+    pub dnum: Option<usize>,
+    pub alpha: Option<usize>, // fixed to 3
 
     // Hybrid key switching key parameters
     pub hybrid_ksk_parameters: Option<Vec<HybridKeySwitchingParameters>>,
@@ -488,7 +489,7 @@ where
             let mut lastq_inv_modq = vec![];
             for j in 0..(q_size - i - 1) {
                 let modqi = &ciphertext_moduli_ops[j];
-                lastq_inv_modq.push(modqi.inv(last_qi));
+                lastq_inv_modq.push(modqi.inv(last_qi % modqi.modulus()));
             }
             lastq_inv_modql.push(lastq_inv_modq);
         }
@@ -511,20 +512,6 @@ where
         let plaintext_modulus_op = Modulus::new(plaintext_modulus);
         let plaintext_ntt_op = T::new(degree, plaintext_modulus);
 
-        // Hybrid key switching
-        const ALPHA: usize = 3;
-        let aux_bits = ciphertext_moduli_sizes.iter().max().unwrap().clone();
-        let dnum = (ciphertext_moduli.len() as f64 / ALPHA as f64).ceil() as usize;
-        let special_moduli = generate_primes_vec(&[aux_bits; ALPHA], degree, &ciphertext_moduli);
-        let special_moduli_ops = special_moduli
-            .iter()
-            .map(|pj| Modulus::new(*pj))
-            .collect_vec();
-        let special_moduli_ntt_ops = special_moduli
-            .iter()
-            .map(|pj| T::new(degree, *pj))
-            .collect_vec();
-
         BfvParameters {
             ciphertext_moduli,
             extension_moduli,
@@ -536,6 +523,8 @@ where
             max_level: q_size - 1,
             q_size,
             p_size,
+
+            variance: 10,
 
             plaintext_modulus,
             plaintext_modulus_op,
@@ -583,12 +572,11 @@ where
             alphal_modpl,
 
             // Hybrid key switching //
-            special_moduli,
-            alpha: ALPHA,
-            dnum,
-            aux_bits,
-            special_moduli_ntt_ops,
-            special_moduli_ops,
+            special_moduli: None,
+            alpha: None,
+            dnum: None,
+            special_moduli_ntt_ops: None,
+            special_moduli_ops: None,
 
             hybrid_ksk_parameters: None,
 
@@ -597,19 +585,33 @@ where
         }
     }
 
-    pub fn enable_hybrid_key_switching(&mut self) {
+    pub fn enable_hybrid_key_switching(&mut self, specialp_bits: &[usize; 3]) {
+        const ALPHA: usize = 3;
+        let dnum = (self.ciphertext_moduli.len() as f64 / ALPHA as f64).ceil() as usize;
+        let special_moduli =
+            generate_primes_vec(specialp_bits, self.degree, &self.ciphertext_moduli);
+        let special_moduli_ops = special_moduli
+            .iter()
+            .map(|pj| Modulus::new(*pj))
+            .collect_vec();
+        let special_moduli_ntt_ops = special_moduli
+            .iter()
+            .map(|pj| T::new(self.degree, *pj))
+            .collect_vec();
+
+        self.special_moduli = Some(special_moduli);
+        self.alpha = Some(ALPHA);
+        self.dnum = Some(dnum);
+        self.special_moduli_ntt_ops = Some(special_moduli_ntt_ops);
+        self.special_moduli_ops = Some(special_moduli_ops);
+
         // generate hybrid key switching parameters for each level except the last one
         let params = (0..self.max_level)
             .into_iter()
             .map(|level| {
                 let ksk_ctx = self.poly_ctx(&PolyType::Q, level);
                 let specialp_ctx = self.poly_ctx(&PolyType::SpecialP, level);
-                HybridKeySwitchingParameters::new(
-                    &ksk_ctx,
-                    &specialp_ctx,
-                    self.alpha,
-                    self.aux_bits,
-                )
+                HybridKeySwitchingParameters::new(&ksk_ctx, &specialp_ctx, ALPHA)
             })
             .collect_vec();
 
@@ -643,24 +645,42 @@ where
                 moduli_count: level_index * 2,
                 degree: self.degree,
             },
-            PolyType::SpecialP => PolyContext {
-                moduli_ops: (self.special_moduli_ops.as_slice(), &[]),
-                ntt_ops: (self.special_moduli_ntt_ops.as_slice(), &[]),
-                moduli_count: self.alpha,
-                degree: self.degree,
-            },
-            PolyType::QP => PolyContext {
-                moduli_ops: (
-                    &self.ciphertext_moduli_ops[..level_index],
-                    &self.special_moduli_ops,
-                ),
-                ntt_ops: (
-                    &self.ciphertext_ntt_ops[..level_index],
-                    &self.special_moduli_ntt_ops,
-                ),
-                moduli_count: level_index + self.alpha,
-                degree: self.degree,
-            },
+            PolyType::SpecialP => {
+                let tmp = PolyContext {
+                    moduli_ops: (
+                        self.special_moduli_ops
+                            .as_ref()
+                            .expect("SpecialP missing")
+                            .as_slice(),
+                        &[],
+                    ),
+                    ntt_ops: (
+                        self.special_moduli_ntt_ops
+                            .as_ref()
+                            .expect("SpecialP missing")
+                            .as_slice(),
+                        &[],
+                    ),
+                    moduli_count: self.alpha.expect("SpecialP missing"),
+                    degree: self.degree,
+                };
+                tmp
+            }
+            PolyType::QP => {
+                let tmp = PolyContext {
+                    moduli_ops: (
+                        &self.ciphertext_moduli_ops[..level_index],
+                        &self.special_moduli_ops.as_ref().expect("QP missing"),
+                    ),
+                    ntt_ops: (
+                        &self.ciphertext_ntt_ops[..level_index],
+                        &self.special_moduli_ntt_ops.as_ref().expect("QP missing"),
+                    ),
+                    moduli_count: level_index + self.alpha.expect("QP missing"),
+                    degree: self.degree,
+                };
+                tmp
+            }
         }
     }
 
@@ -676,7 +696,7 @@ where
 
     pub fn default(moduli_count: usize, polynomial_degree: usize) -> BfvParameters<T> {
         let mut params = BfvParameters::new(&vec![50; moduli_count], 65537, polynomial_degree);
-        params.enable_hybrid_key_switching();
+        params.enable_hybrid_key_switching(&[50, 50, 50]);
         params
     }
 }
@@ -685,7 +705,6 @@ where
 pub struct HybridKeySwitchingParameters {
     pub(crate) dnum: usize,
     pub(crate) alpha: usize,
-    pub(crate) aux_bits: usize,
 
     pub(crate) g: Vec<BigUint>,
 
@@ -706,7 +725,6 @@ impl HybridKeySwitchingParameters {
         ksk_ctx: &PolyContext<'_, T>,
         specialp_ctx: &PolyContext<'_, T>,
         alpha: usize,
-        aux_bits: usize,
     ) -> HybridKeySwitchingParameters {
         let mut qj = vec![];
         ksk_ctx
@@ -722,17 +740,14 @@ impl HybridKeySwitchingParameters {
                 qj.push(qji);
             });
 
-        // This is just for precaution. Ideally alpha*aux_bits must be greater than maxbits. But
-        // having alpha*auxbits - maxbits greater than a few bits costs performance, since you end
-        // up having an additional special prime for nothing. In our case, alpha and aux_bites are fixed
-        // to 3 and 60. Hence, assuming that you have alpha consecutive ciphertext primes of size 40-60
-        // (usually the case for lower levels) it must be the case that maxbits is around 120.
         let mut maxbits = qj[0].bits();
         qj.iter().skip(1).for_each(|q| {
             maxbits = std::cmp::max(maxbits, q.bits());
         });
-        let ideal_special_primes_count = (maxbits as f64 / aux_bits as f64).ceil() as usize;
-        assert!(ideal_special_primes_count <= alpha);
+
+        // bits in P must be more or less equal to bits in max(Qj) to assure that noise growth is key to minimum
+        let specialp_bits = specialp_ctx.big_q().bits();
+        assert!(maxbits / specialp_bits <= 1);
 
         // P is special prime
         let p = specialp_ctx.big_q();
@@ -834,7 +849,6 @@ impl HybridKeySwitchingParameters {
         HybridKeySwitchingParameters {
             dnum: parts,
             alpha,
-            aux_bits,
 
             g,
 
