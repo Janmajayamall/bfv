@@ -149,7 +149,6 @@ mod tests {
         ct0.seed = None;
 
         let ct_proto = proto::Ciphertext::try_from_with_parameters(&ct0, evaluator.params());
-
         let ct_back = Ciphertext::try_from_with_parameters(&ct_proto, evaluator.params());
 
         assert_eq!(ct0, ct_back);
