@@ -32,8 +32,8 @@ impl Evaluator {
     }
 
     pub fn mul_lazy(&self, lhs: &Ciphertext, rhs: &Ciphertext) -> Ciphertext {
-        debug_assert!(lhs.c.len() == 2);
-        debug_assert!(rhs.c.len() == 2);
+        assert!(lhs.c.len() == 2);
+        assert!(rhs.c.len() == 2);
         #[cfg(debug_assertions)]
         {
             // We save 2 ntts if polynomial passed to `fast_expand_crt_basis_p_over_q` is in coefficient form. Hence
@@ -525,4 +525,72 @@ mod tests {
         }
         println!("Noise after: {}", evaluator.measure_noise(&sk, &ct));
     }
+
+    // #[test]
+    // fn trial() {
+    //     let mut rng = thread_rng();
+    //     let moduli = vec![50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 60];
+    //     let mut params = BfvParameters::new(&moduli, 65537, 1 << 15);
+    //     params.enable_hybrid_key_switching(&[50, 50, 60]);
+
+    //     // gen keys
+    //     let sk = SecretKey::random(params.degree, &mut rng);
+
+    //     let mut m0 = params
+    //         .plaintext_modulus_op
+    //         .random_vec(params.degree, &mut rng);
+
+    //     let evaluator = Evaluator::new(params);
+    //     let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
+
+    //     let ek = EvaluationKey::new(
+    //         evaluator.params(),
+    //         &sk,
+    //         &(0..12).into_iter().collect_vec(),
+    //         &[],
+    //         &[],
+    //         &mut rng,
+    //     );
+
+    //     let set0 = (0..20)
+    //         .into_iter()
+    //         .map(|_| evaluator.encrypt(&sk, &pt0, &mut rng))
+    //         .collect_vec();
+    //     let mut set1 = (0..20)
+    //         .into_iter()
+    //         .map(|_| evaluator.encrypt(&sk, &pt0, &mut rng))
+    //         .collect_vec();
+
+    //     let mut s1 = evaluator.encrypt(&sk, &pt0, &mut rng);
+    //     let mut s2 = evaluator.encrypt(&sk, &pt0, &mut rng);
+
+    //     for i in 0..20 {
+    //         s1 = evaluator.relinearize(&evaluator.mul(&s1, &set0[i]), &ek);
+
+    //         evaluator.mod_down_level(&mut set1[i], s2.level());
+    //         s2 = evaluator.relinearize(&evaluator.mul(&s2, &set1[i]), &ek);
+
+    //         if (i + 1) % 2 == 0 {
+    //             evaluator.mod_down_next(&mut s2);
+    //         }
+    //     }
+
+    //     dbg!(evaluator.measure_noise(&sk, &s1));
+    //     dbg!(evaluator.measure_noise(&sk, &s2));
+    //     dbg!(s2.level());
+    //     evaluator.mod_down_level(&mut s1, s2.level());
+
+    //     dbg!("Mod down");
+    //     dbg!(evaluator.measure_noise(&sk, &s1));
+    //     dbg!(evaluator.measure_noise(&sk, &s2));
+
+    //     evaluator.ciphertext_change_representation(&mut s1, Representation::Evaluation);
+    //     evaluator.ciphertext_change_representation(&mut s2, Representation::Evaluation);
+
+    //     let sp1 = evaluator.mul_poly(&s1, pt0.poly_ntt_ref());
+    //     let sp2 = evaluator.mul_poly(&s2, pt0.poly_ntt_ref());
+
+    //     dbg!(evaluator.measure_noise(&sk, &sp1));
+    //     dbg!(evaluator.measure_noise(&sk, &sp2));
+    // }
 }

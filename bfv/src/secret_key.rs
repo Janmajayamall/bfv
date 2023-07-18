@@ -3,7 +3,7 @@ use crate::{BfvParameters, Ciphertext, PolyType};
 use crate::{Poly, PolyContext, Representation};
 use itertools::Itertools;
 use rand::distributions::{Distribution, Uniform};
-use rand::{CryptoRng, RngCore, SeedableRng};
+use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 pub struct SecretKey {
@@ -13,13 +13,46 @@ pub struct SecretKey {
 impl SecretKey {
     /// Generates a random secret key
     pub fn random<R: CryptoRng + RngCore>(degree: usize, rng: &mut R) -> SecretKey {
-        let coefficients = Uniform::new(-1, 2)
-            .sample_iter(rng)
-            .take(degree)
-            .collect_vec()
-            .into_boxed_slice();
+        let hw = degree / 2;
 
-        SecretKey { coefficients }
+        let mut sk = vec![0i64; degree];
+
+        let mut indices = (0..degree).into_iter().collect_vec();
+
+        let mut random_bytes = vec![0u8; (hw as f64 / 8.0).ceil() as usize];
+        rng.fill_bytes(&mut random_bytes);
+
+        let mut byte_index = 0;
+        let mut random_bit_pos = 0;
+
+        for i in 0..hw {
+            // sample random index
+            let sampled_index = rng.gen_range(0..degree - i);
+
+            // dbg!(random_bytes[byte_index] & 1);
+            match random_bytes[byte_index] & 1 {
+                0 => sk[indices[sampled_index]] = 1,
+                1 => sk[indices[sampled_index]] = -1,
+                _ => {
+                    panic!("Impossible!")
+                }
+            }
+
+            random_bytes[byte_index] >>= 1;
+            random_bit_pos += 1;
+            if random_bit_pos == 8 {
+                byte_index += 1;
+                random_bit_pos = 0;
+            }
+
+            // removed the sampled one
+            indices[sampled_index] = *indices.last().unwrap();
+            indices.truncate(indices.len() - 1);
+        }
+
+        SecretKey {
+            coefficients: sk.into_boxed_slice(),
+        }
     }
 
     /// Creates a new secret key with given coefficients.
@@ -199,5 +232,24 @@ mod tests {
         let pt2 = sk.decrypt(&ct, &params);
         let m2 = pt2.decode(Encoding::simd(0), &params);
         assert_eq!(m, m2);
+    }
+
+    #[test]
+    fn test_hamming_weight() {
+        let mut rng = thread_rng();
+        let sk = SecretKey::random(32768, &mut rng);
+
+        let mut ones = 0;
+        let mut nones = 0;
+        let mut zeros = 0;
+
+        sk.coefficients.iter().for_each(|c| match *c {
+            0 => zeros += 1,
+            1 => ones += 1,
+            -1 => nones += 1,
+            _ => {}
+        });
+
+        println!("ones: {ones}, nones: {nones}, zeros: {zeros}")
     }
 }
