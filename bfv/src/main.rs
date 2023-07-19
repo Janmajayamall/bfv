@@ -96,7 +96,7 @@ fn ciphertext_mul() {
     let params = BfvParameters::default(15, 1 << 15);
 
     // gen keys
-    let sk = SecretKey::random(params.degree, &mut rng);
+    let sk = SecretKey::random(params.degree, params.hw, &mut rng);
     let ek = EvaluationKey::new(&params, &sk, &[0], &[], &[], &mut rng);
 
     let mut m0 = params
@@ -127,7 +127,7 @@ fn ciphertext_mul() {
 fn ciphertext_add() {
     let mut rng = thread_rng();
     let params = BfvParameters::default(15, 1 << 15);
-    let sk = SecretKey::random(params.degree, &mut rng);
+    let sk = SecretKey::random(params.degree, params.hw, &mut rng);
 
     let mut m0 = params
         .plaintext_modulus_op
@@ -152,7 +152,7 @@ fn ciphertext_rotate() {
     let params = BfvParameters::default(15, 1 << 15);
 
     // gen keys
-    let sk = SecretKey::random(params.degree, &mut rng);
+    let sk = SecretKey::random(params.degree, params.hw, &mut rng);
     let ek = EvaluationKey::new(&params, &sk, &[], &[0], &[0], &mut rng);
 
     let m0 = params

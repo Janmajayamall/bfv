@@ -17,7 +17,7 @@ fn bench_bfv(c: &mut Criterion) {
             let params = BfvParameters::default(m_size, degree);
             let logq = params.poly_ctx(&PolyType::Q, 0).big_q().bits();
 
-            let sk = SecretKey::random(params.degree, &mut rng);
+            let sk = SecretKey::random(params.degree, params.hw, &mut rng);
 
             let mut m0 = params
                 .plaintext_modulus_op

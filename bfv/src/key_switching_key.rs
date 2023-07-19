@@ -506,7 +506,7 @@ mod tests {
 
         let mut rng = thread_rng();
 
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
 
         let poly = ksk_ctx.random(Representation::Evaluation, &mut rng);
         let ksk = BVKeySwitchingKey::new(&poly, &sk, &ksk_ctx, &mut rng);
@@ -545,7 +545,7 @@ mod tests {
             HybridKeySwitchingParameters::new(&ksk_ctx, &specialp_ctx, params.alpha.unwrap());
         let mut rng = thread_rng();
 
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
 
         let poly = ksk_ctx.random(Representation::Evaluation, &mut rng);
 
@@ -583,7 +583,7 @@ mod tests {
 
         let mut rng = thread_rng();
         let poly = ksk_ctx.random(Representation::Evaluation, &mut rng);
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
         let mut ksk = HybridKeySwitchingKey::new(
             params.hybrid_key_switching_params_at_level(0),
             &poly,

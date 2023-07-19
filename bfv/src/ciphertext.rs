@@ -139,7 +139,7 @@ mod tests {
         let mut rng = thread_rng();
         let params = BfvParameters::default(5, 1 << 3);
 
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
         let mut m0 = params
             .plaintext_modulus_op
             .random_vec(params.degree, &mut rng);

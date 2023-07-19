@@ -120,7 +120,7 @@ mod tests {
         let params = BfvParameters::default(6, 1 << 4);
 
         let mut rng = thread_rng();
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
 
         let rlk = RelinearizationKey::new(&params, &sk, 0, &mut rng);
 

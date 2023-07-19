@@ -6,19 +6,22 @@ use rand::distributions::{Distribution, Uniform};
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
+#[derive(Clone)]
 pub struct SecretKey {
     pub(crate) coefficients: Box<[i64]>,
 }
 
 impl SecretKey {
-    /// Generates a random secret key
-    pub fn random<R: CryptoRng + RngCore>(degree: usize, rng: &mut R) -> SecretKey {
-        let hw = degree / 2;
-
+    /// Generates a random secret key with fixed hamming weight `hw`.
+    ///
+    /// The code is adapted from [Lattigo](https://github.com/tuneinsight/lattigo)
+    pub fn random<R: CryptoRng + RngCore>(degree: usize, hw: usize, rng: &mut R) -> SecretKey {
         let mut sk = vec![0i64; degree];
 
+        // Think of indices vec as a set from which we sample `hw` indices to either set 1 or -1.
         let mut indices = (0..degree).into_iter().collect_vec();
 
+        // We need `hw` random bits.
         let mut random_bytes = vec![0u8; (hw as f64 / 8.0).ceil() as usize];
         rng.fill_bytes(&mut random_bytes);
 
@@ -26,10 +29,9 @@ impl SecretKey {
         let mut random_bit_pos = 0;
 
         for i in 0..hw {
-            // sample random index
+            // sample random index in range [0, indices.len())
             let sampled_index = rng.gen_range(0..degree - i);
 
-            // dbg!(random_bytes[byte_index] & 1);
             match random_bytes[byte_index] & 1 {
                 0 => sk[indices[sampled_index]] = 1,
                 1 => sk[indices[sampled_index]] = -1,
@@ -40,12 +42,13 @@ impl SecretKey {
 
             random_bytes[byte_index] >>= 1;
             random_bit_pos += 1;
+            // bits at `byte_index` position have been consumed. Move to the next.
             if random_bit_pos == 8 {
                 byte_index += 1;
                 random_bit_pos = 0;
             }
 
-            // removed the sampled one
+            // removed the sampled index from `indices` set.
             indices[sampled_index] = *indices.last().unwrap();
             indices.truncate(indices.len() - 1);
         }
@@ -53,6 +56,15 @@ impl SecretKey {
         SecretKey {
             coefficients: sk.into_boxed_slice(),
         }
+    }
+
+    /// Convenience wrapper around `SecretKey::random` if `BfvParameters` happens to be already
+    /// initialised
+    pub fn random_with_params<R: CryptoRng + RngCore>(
+        params: &BfvParameters,
+        rng: &mut R,
+    ) -> SecretKey {
+        SecretKey::random(params.degree, params.hw, rng)
     }
 
     /// Creates a new secret key with given coefficients.
@@ -217,7 +229,7 @@ mod tests {
     fn test_encryption_decryption() {
         let mut rng = thread_rng();
         let params = BfvParameters::default(1, 1 << 4);
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
 
         let m = rng
             .clone()
@@ -237,7 +249,7 @@ mod tests {
     #[test]
     fn test_hamming_weight() {
         let mut rng = thread_rng();
-        let sk = SecretKey::random(32768, &mut rng);
+        let sk = SecretKey::random(32768, 16384, &mut rng);
 
         let mut ones = 0;
         let mut nones = 0;

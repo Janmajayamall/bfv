@@ -353,7 +353,7 @@ mod tests {
             .plaintext_modulus_op
             .random_vec(params.degree, &mut rng);
 
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
 
         let evaluator = Evaluator::new(params);
         let pt = evaluator.plaintext_encode(&m, Encoding::default());
@@ -371,7 +371,7 @@ mod tests {
         let params = BfvParameters::default(5, 1 << 3);
 
         // gen keys
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
         let ek = EvaluationKey::new(&params, &sk, &[0], &[], &[], &mut rng);
 
         let mut m0 = params
@@ -422,7 +422,7 @@ mod tests {
         params.enable_hybrid_key_switching(&[50, 50, 50]);
 
         // gen keys
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
         let ek = EvaluationKey::new(&params, &sk, &[], &[0], &[1], &mut rng);
 
         let m0 = params
@@ -457,7 +457,7 @@ mod tests {
         let params = BfvParameters::default(15, 1 << 15);
 
         // gen keys
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
 
         let mut m0 = params
             .plaintext_modulus_op
@@ -510,7 +510,7 @@ mod tests {
         let mut rng = thread_rng();
         let params = BfvParameters::default(15, 1 << 3);
 
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
         let mut m0 = params
             .plaintext_modulus_op
             .random_vec(params.degree, &mut rng);

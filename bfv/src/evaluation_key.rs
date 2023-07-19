@@ -118,7 +118,7 @@ mod tests {
         let mut rng = thread_rng();
         let params = BfvParameters::default(15, 1 << 8);
 
-        let sk = SecretKey::random(params.degree, &mut rng);
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
 
         let ek = EvaluationKey::new(
             &params,

@@ -30,6 +30,7 @@ pub struct BfvParameters<T: Ntt> {
     pub max_level: usize,
 
     pub variance: usize,
+    pub hw: usize,
 
     pub plaintext_modulus: u64,
     pub plaintext_modulus_op: Modulus,
@@ -139,6 +140,8 @@ where
         plaintext_modulus: u64,
         degree: usize,
     ) -> BfvParameters<T> {
+        assert!(degree.is_power_of_two());
+
         // generate Q moduli chain
         let ciphertext_moduli = generate_primes_vec(ciphertext_moduli_sizes, degree, &[]);
 
@@ -512,6 +515,9 @@ where
         let plaintext_modulus_op = Modulus::new(plaintext_modulus);
         let plaintext_ntt_op = T::new(degree, plaintext_modulus);
 
+        // Default to Hamming weight set to N/2.
+        let hw = degree / 2;
+
         BfvParameters {
             ciphertext_moduli,
             extension_moduli,
@@ -525,6 +531,7 @@ where
             p_size,
 
             variance: 10,
+            hw,
 
             plaintext_modulus,
             plaintext_modulus_op,
@@ -583,6 +590,10 @@ where
             // Mod down next //
             lastq_inv_modql,
         }
+    }
+
+    pub fn change_hamming_weight(&mut self, hw: usize) {
+        self.hw = hw;
     }
 
     pub fn enable_hybrid_key_switching(&mut self, specialp_bits: &[usize; 3]) {
