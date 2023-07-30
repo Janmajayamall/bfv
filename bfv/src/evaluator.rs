@@ -264,6 +264,74 @@ impl Evaluator {
         }
     }
 
+    pub fn mul_plaintext_assign(&self, ct: &mut Ciphertext, pt: &Plaintext) {
+        assert!(ct.level() == pt.level());
+        assert!(ct.poly_type() == pt.mul_poly_type());
+
+        self.mul_poly_assign(ct, pt.mul_poly_ref());
+    }
+
+    pub fn mul_plaintext(&self, ct: &Ciphertext, pt: &Plaintext) -> Ciphertext {
+        assert!(ct.level() == pt.level());
+        assert!(ct.poly_type() == pt.mul_poly_type());
+
+        self.mul_poly(ct, pt.mul_poly_ref())
+    }
+
+    pub fn add_assign_plaintext(&self, ct: &mut Ciphertext, pt: &Plaintext) {
+        assert!(ct.level() == pt.encoding.as_ref().unwrap().level);
+        assert!(ct.poly_type() == PolyType::Q);
+
+        let ctx = self.params.poly_ctx(&ct.poly_type, ct.level);
+        ctx.add_assign(&mut ct.c_ref_mut()[0], pt.add_sub_poly_ref());
+    }
+
+    pub fn add_plaintext(&self, ct: &Ciphertext, pt: &Plaintext) -> Ciphertext {
+        assert!(ct.level() == pt.encoding.as_ref().unwrap().level);
+        assert!(ct.poly_type() == PolyType::Q);
+        assert!(ct.c.len() == 2);
+
+        let ctx = self.params.poly_ctx(&ct.poly_type, ct.level);
+        let c0 = ctx.add(&ct.c_ref()[0], pt.add_sub_poly_ref());
+
+        let c = vec![c0, ct.c_ref()[1].clone()];
+
+        Ciphertext {
+            c,
+            // since c1 does not changes seed remains valid
+            seed: ct.seed.clone(),
+            poly_type: ct.poly_type.clone(),
+            level: ct.level,
+        }
+    }
+
+    pub fn sub_assign_plaintext(&self, ct: &mut Ciphertext, pt: &Plaintext) {
+        assert!(ct.level() == pt.encoding.as_ref().unwrap().level);
+        assert!(ct.poly_type() == PolyType::Q);
+
+        let ctx = self.params.poly_ctx(&ct.poly_type, ct.level);
+        ctx.sub_assign(&mut ct.c_ref_mut()[0], pt.add_sub_poly_ref());
+    }
+
+    pub fn sub_plaintext(&self, ct: &Ciphertext, pt: &Plaintext) -> Ciphertext {
+        assert!(ct.level() == pt.encoding.as_ref().unwrap().level);
+        assert!(ct.poly_type() == PolyType::Q);
+        assert!(ct.c.len() == 2);
+
+        let ctx = self.params.poly_ctx(&ct.poly_type, ct.level);
+        let c0 = ctx.sub(&ct.c_ref()[0], pt.add_sub_poly_ref());
+
+        let c = vec![c0, ct.c_ref()[1].clone()];
+
+        Ciphertext {
+            c,
+            // since c1 does not changes seed remains valid
+            seed: ct.seed.clone(),
+            poly_type: ct.poly_type.clone(),
+            level: ct.level,
+        }
+    }
+
     /// c0 = poly - c0
     pub fn sub_ciphertext_from_poly_inplace(&self, c0: &mut Ciphertext, poly: &Poly) {
         let ctx = self.params.poly_ctx(&c0.poly_type, c0.level);
@@ -339,9 +407,11 @@ impl Evaluator {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use rand::thread_rng;
 
-    use crate::{relinearization_key::RelinearizationKey, utils::rot_to_galois_element};
+    use crate::{relinearization_key::RelinearizationKey, utils::rot_to_galois_element, PolyCache};
 
     use super::*;
 
@@ -415,6 +485,97 @@ mod tests {
     }
 
     #[test]
+    fn test_add_sub_plaintext() {
+        let mut rng = thread_rng();
+        let params = BfvParameters::default(5, 1 << 3);
+
+        // gen keys
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
+
+        let mut m0 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+        let m1 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+
+        let evaluator = Evaluator::new(params);
+        let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
+        let pt1 = evaluator.plaintext_encode(
+            &m1,
+            Encoding::simd(0, PolyCache::AddSub(Representation::Coefficient)),
+        );
+
+        let ct = evaluator.encrypt(&sk, &pt0, &mut rng);
+
+        // add plaintext
+        let ct_add = evaluator.add_plaintext(&ct, &pt1);
+        let res_add =
+            evaluator.plaintext_decode(&evaluator.decrypt(&sk, &ct_add), Encoding::default());
+        let mut expected_add = m0.clone();
+        evaluator
+            .params
+            .plaintext_modulus_op
+            .add_mod_fast_vec(&mut expected_add, &m1);
+        assert_eq!(res_add, expected_add);
+
+        // sub plaintext
+        let ct_sub = evaluator.sub_plaintext(&ct, &pt1);
+        let res_sub =
+            evaluator.plaintext_decode(&evaluator.decrypt(&sk, &ct_sub), Encoding::default());
+        let mut expected_sub = m0.clone();
+        evaluator
+            .params
+            .plaintext_modulus_op
+            .sub_mod_fast_vec(&mut expected_sub, &m1);
+        assert_eq!(res_sub, expected_sub);
+    }
+
+    #[test]
+    fn test_mul_poly() {
+        let mut rng = thread_rng();
+        let params = BfvParameters::default(5, 1 << 3);
+
+        // gen keys
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
+
+        let mut m0 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+        let m1 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+
+        let mut m0m1 = m0.clone();
+        params.plaintext_modulus_op.mul_mod_fast_vec(&mut m0m1, &m1);
+
+        let evaluator = Evaluator::new(params);
+        let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
+
+        let mut ct = evaluator.encrypt(&sk, &pt0, &mut rng);
+        evaluator.ciphertext_change_representation(&mut ct, Representation::Evaluation);
+
+        // PolyType::Q
+        let pt1 = evaluator.plaintext_encode(&m1, Encoding::simd(0, PolyCache::Mul(PolyType::Q)));
+        let res_ct = evaluator.mul_plaintext(&ct, &pt1);
+        let res = evaluator.plaintext_decode(&evaluator.decrypt(&sk, &res_ct), Encoding::default());
+        assert_eq!(&res, &m0m1);
+
+        // PolyType::PQ; For ex, after mul_lazy
+        let pt1 = evaluator.plaintext_encode(&m1, Encoding::simd(0, PolyCache::Mul(PolyType::PQ)));
+        let ct_lazy = evaluator.mul_lazy(&ct, &ct);
+        let mut res_ct = evaluator.mul_plaintext(&ct_lazy, &pt1);
+        let res_ct = evaluator.scale_and_round(&mut res_ct);
+        let res = evaluator.plaintext_decode(&evaluator.decrypt(&sk, &res_ct), Encoding::default());
+        // m0^2 * m1
+        evaluator
+            .params()
+            .plaintext_modulus_op
+            .mul_mod_fast_vec(&mut m0m1, &m0);
+        assert_eq!(&res, &m0m1);
+    }
+
+    #[test]
     fn test_rotations() {
         let mut rng = thread_rng();
         // let params = BfvParameters::default(15, 1 << 15);
@@ -464,6 +625,7 @@ mod tests {
             .random_vec(params.degree, &mut rng);
 
         let evaluator = Evaluator::new(params);
+
         let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
 
         let set0 = (0..256)
@@ -525,72 +687,4 @@ mod tests {
         }
         println!("Noise after: {}", evaluator.measure_noise(&sk, &ct));
     }
-
-    // #[test]
-    // fn trial() {
-    //     let mut rng = thread_rng();
-    //     let moduli = vec![50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 60];
-    //     let mut params = BfvParameters::new(&moduli, 65537, 1 << 15);
-    //     params.enable_hybrid_key_switching(&[50, 50, 60]);
-
-    //     // gen keys
-    //     let sk = SecretKey::random(params.degree, &mut rng);
-
-    //     let mut m0 = params
-    //         .plaintext_modulus_op
-    //         .random_vec(params.degree, &mut rng);
-
-    //     let evaluator = Evaluator::new(params);
-    //     let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
-
-    //     let ek = EvaluationKey::new(
-    //         evaluator.params(),
-    //         &sk,
-    //         &(0..12).into_iter().collect_vec(),
-    //         &[],
-    //         &[],
-    //         &mut rng,
-    //     );
-
-    //     let set0 = (0..20)
-    //         .into_iter()
-    //         .map(|_| evaluator.encrypt(&sk, &pt0, &mut rng))
-    //         .collect_vec();
-    //     let mut set1 = (0..20)
-    //         .into_iter()
-    //         .map(|_| evaluator.encrypt(&sk, &pt0, &mut rng))
-    //         .collect_vec();
-
-    //     let mut s1 = evaluator.encrypt(&sk, &pt0, &mut rng);
-    //     let mut s2 = evaluator.encrypt(&sk, &pt0, &mut rng);
-
-    //     for i in 0..20 {
-    //         s1 = evaluator.relinearize(&evaluator.mul(&s1, &set0[i]), &ek);
-
-    //         evaluator.mod_down_level(&mut set1[i], s2.level());
-    //         s2 = evaluator.relinearize(&evaluator.mul(&s2, &set1[i]), &ek);
-
-    //         if (i + 1) % 2 == 0 {
-    //             evaluator.mod_down_next(&mut s2);
-    //         }
-    //     }
-
-    //     dbg!(evaluator.measure_noise(&sk, &s1));
-    //     dbg!(evaluator.measure_noise(&sk, &s2));
-    //     dbg!(s2.level());
-    //     evaluator.mod_down_level(&mut s1, s2.level());
-
-    //     dbg!("Mod down");
-    //     dbg!(evaluator.measure_noise(&sk, &s1));
-    //     dbg!(evaluator.measure_noise(&sk, &s2));
-
-    //     evaluator.ciphertext_change_representation(&mut s1, Representation::Evaluation);
-    //     evaluator.ciphertext_change_representation(&mut s2, Representation::Evaluation);
-
-    //     let sp1 = evaluator.mul_poly(&s1, pt0.poly_ntt_ref());
-    //     let sp2 = evaluator.mul_poly(&s2, pt0.poly_ntt_ref());
-
-    //     dbg!(evaluator.measure_noise(&sk, &sp1));
-    //     dbg!(evaluator.measure_noise(&sk, &sp2));
-    // }
 }

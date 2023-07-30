@@ -105,7 +105,7 @@ impl SecretKey {
         let ctx = params.poly_ctx(&PolyType::Q, encoding.level);
         let mut sk_poly = self.to_poly(&ctx);
 
-        let m = pt.to_poly(params, Representation::Evaluation);
+        let m = pt.scale_plaintext(params, Representation::Evaluation);
 
         // seed `a`
         let mut seed = <ChaCha8Rng as SeedableRng>::Seed::default();
@@ -175,18 +175,17 @@ impl SecretKey {
         Plaintext {
             m,
             encoding: None,
-            poly_ntt: None,
+            mul_poly: None,
+            add_sub_poly: None,
         }
     }
 
     pub fn measure_noise(&self, ct: &Ciphertext, params: &BfvParameters) -> u64 {
         // TODO: replace default simd with encoding used for ciphertext. This will require
         // adding encoding info to ciphertext
-        let m = self
-            .decrypt(ct, params)
-            .decode(Encoding::simd(ct.level), params);
-        let scaled_m = Plaintext::encode(&m, &params, Encoding::simd(ct.level))
-            .to_poly(&params, Representation::Evaluation);
+        let m = self.decrypt(ct, params).decode(Encoding::default(), params);
+        let scaled_m = Plaintext::encode(&m, &params, Encoding::default())
+            .scale_plaintext(&params, Representation::Evaluation);
 
         let ctx = params.poly_ctx(&ct.poly_type, ct.level);
 
@@ -236,13 +235,13 @@ mod tests {
             .sample_iter(Uniform::new(0, params.plaintext_modulus))
             .take(params.degree)
             .collect_vec();
-        let pt = Plaintext::encode(&m, &params, Encoding::simd(0));
+        let pt = Plaintext::encode(&m, &params, Encoding::default());
         let ct = sk.encrypt(&params, &pt, &mut rng);
 
         dbg!(sk.measure_noise(&ct, &params));
 
         let pt2 = sk.decrypt(&ct, &params);
-        let m2 = pt2.decode(Encoding::simd(0), &params);
+        let m2 = pt2.decode(Encoding::default(), &params);
         assert_eq!(m, m2);
     }
 

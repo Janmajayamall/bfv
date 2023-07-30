@@ -839,7 +839,7 @@ where
     }
 
     pub fn add(&self, lhs: &Poly, rhs: &Poly) -> Poly {
-        debug_assert!(lhs.representation == rhs.representation);
+        assert!(lhs.representation == rhs.representation);
 
         let mut coeffs = Array2::<u64>::uninit((self.moduli_count, self.degree));
 

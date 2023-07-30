@@ -1,11 +1,6 @@
-use traits::Ntt;
-
-use crate::modulus::Modulus;
 use crate::poly::{Poly, Representation};
-use crate::Ciphertext;
 use crate::{BfvParameters, PolyType};
-use std::ops::SubAssign;
-use std::sync::Arc;
+use traits::Ntt;
 
 #[derive(PartialEq, Clone)]
 pub enum EncodingType {
@@ -13,16 +8,31 @@ pub enum EncodingType {
     Poly,
 }
 
+#[derive(PartialEq, Clone)]
+pub enum PolyCache {
+    /// Supports scalar multiplications
+    Mul(PolyType),
+    /// Supports additions, subtractions
+    /// Only supports PolyType::Q
+    AddSub(Representation),
+    /// Supports both
+    All(PolyType, Representation),
+    /// Used for encryption
+    None,
+}
+
 #[derive(Clone)]
 pub struct Encoding {
     pub(crate) encoding_type: EncodingType,
+    pub(crate) poly_cache: PolyCache,
     pub(crate) level: usize,
 }
 
 impl Encoding {
-    pub fn simd(level: usize) -> Encoding {
+    pub fn simd(level: usize, poly_cache: PolyCache) -> Encoding {
         Encoding {
             encoding_type: EncodingType::Simd,
+            poly_cache,
             level,
         }
     }
@@ -32,6 +42,7 @@ impl Default for Encoding {
     fn default() -> Self {
         Encoding {
             encoding_type: EncodingType::Simd,
+            poly_cache: PolyCache::None,
             level: 0,
         }
     }
@@ -41,7 +52,8 @@ impl Default for Encoding {
 pub struct Plaintext {
     pub(crate) m: Vec<u64>,
     pub(crate) encoding: Option<Encoding>,
-    pub(crate) poly_ntt: Option<Poly>,
+    pub(crate) mul_poly: Option<Poly>,
+    pub(crate) add_sub_poly: Option<Poly>,
 }
 
 impl Plaintext {
@@ -68,14 +80,39 @@ impl Plaintext {
         }
 
         // convert m to polynomial with poly context at specific level
-        let ctx = params.poly_ctx(&crate::PolyType::Q, encoding.level);
-        let mut poly_ntt = ctx.try_convert_from_u64(&m1, Representation::Coefficient);
-        ctx.change_representation(&mut poly_ntt, Representation::Evaluation);
+        let (mul_poly, add_sub_poly) = {
+            match &encoding.poly_cache {
+                PolyCache::Mul(poly_type) => {
+                    let ctx = params.poly_ctx(poly_type, encoding.level);
+                    let mut mul_poly = ctx.try_convert_from_u64(&m1, Representation::Coefficient);
+                    ctx.change_representation(&mut mul_poly, Representation::Evaluation);
+                    (Some(mul_poly), None)
+                }
+                PolyCache::AddSub(representation) => {
+                    let poly = Plaintext::scale_m(&m1, params, &encoding, representation.clone());
+                    (None, Some(poly))
+                }
+                PolyCache::All(poly_type, representation) => {
+                    // mul
+                    let ctx = params.poly_ctx(&poly_type, encoding.level);
+                    let mut mul_poly = ctx.try_convert_from_u64(&m1, Representation::Coefficient);
+                    ctx.change_representation(&mut mul_poly, Representation::Evaluation);
+
+                    // add + sub
+                    let add_sub_poly =
+                        Plaintext::scale_m(&m1, params, &encoding, representation.clone());
+
+                    (Some(mul_poly), Some(add_sub_poly))
+                }
+                PolyCache::None => (None, None),
+            }
+        };
 
         Plaintext {
             m: m1,
             encoding: Some(encoding),
-            poly_ntt: Some(poly_ntt),
+            mul_poly: mul_poly,
+            add_sub_poly: add_sub_poly,
         }
     }
 
@@ -102,43 +139,67 @@ impl Plaintext {
     /// Returns message polynomial `m` scaled by Q/t
     ///
     /// Panics if encoding is not specified
-    pub fn to_poly(&self, params: &BfvParameters, representation: Representation) -> Poly {
-        match &self.encoding {
-            Some(encoding) => {
-                let modt = &params.plaintext_modulus_op;
+    pub fn scale_m(
+        m: &[u64],
+        params: &BfvParameters,
+        encoding: &Encoding,
+        representation: Representation,
+    ) -> Poly {
+        let modt = &params.plaintext_modulus_op;
 
-                let mut m = self.m.clone();
-                modt.scalar_mul_mod_fast_vec(&mut m, params.ql_modt[encoding.level]);
+        let mut m = m.to_vec();
+        modt.scalar_mul_mod_fast_vec(&mut m, params.ql_modt[encoding.level]);
 
-                let ctx = params.poly_ctx(&PolyType::Q, encoding.level);
-                let mut m_poly = ctx.try_convert_from_u64(&m, Representation::Coefficient);
+        let ctx = params.poly_ctx(&PolyType::Q, encoding.level);
+        let mut m_poly = ctx.try_convert_from_u64(&m, Representation::Coefficient);
 
-                // An alternate method to this will be to store [-t_inv]_Q
-                // and perform scalar multiplication [-t_inv]_Q with `m_poly`
-                // in coefficient form.
-                // We prefer this because `m_poly` needs to change representation
-                // to `Evaluation` anyways.
-                ctx.change_representation(&mut m_poly, Representation::Evaluation);
-                ctx.mul_assign(&mut m_poly, &params.neg_t_inv_modql[encoding.level]);
+        // An alternate method to this will be to store [-t_inv]_Q
+        // and perform scalar multiplication [-t_inv]_Q with `m_poly`
+        // in coefficient form.
+        // We prefer this because `m_poly` needs to change representation
+        // to `Evaluation` anyways.
+        ctx.change_representation(&mut m_poly, Representation::Evaluation);
+        ctx.mul_assign(&mut m_poly, &params.neg_t_inv_modql[encoding.level]);
 
-                if representation != Representation::Evaluation {
-                    ctx.change_representation(&mut m_poly, representation);
-                }
+        if representation != Representation::Evaluation {
+            ctx.change_representation(&mut m_poly, representation);
+        }
 
-                m_poly
-            }
-            None => {
-                panic!("Encoding not specified!");
+        m_poly
+    }
+
+    pub fn scale_plaintext(&self, params: &BfvParameters, representation: Representation) -> Poly {
+        let encoding = self.encoding.as_ref().expect("Plaintext missing encoding.");
+        Plaintext::scale_m(&self.m, params, encoding, representation)
+    }
+
+    pub fn mul_poly_type(&self) -> PolyType {
+        match &self.encoding.as_ref().unwrap().poly_cache {
+            PolyCache::Mul(poly_type) => poly_type.clone(),
+            _ => {
+                panic!("PolyCache not Mul")
             }
         }
     }
 
-    pub fn poly_ntt_ref(&self) -> &Poly {
-        self.poly_ntt.as_ref().expect("Missing poly ntt")
+    pub fn level(&self) -> usize {
+        self.encoding.as_ref().unwrap().level
     }
 
-    pub fn move_poly_ntt(self) -> Poly {
-        self.poly_ntt.expect("Missing poly ntt")
+    pub fn supports_mul_poly(&self) -> bool {
+        self.mul_poly.is_some()
+    }
+
+    pub fn add_sub_poly_ref(&self) -> &Poly {
+        self.add_sub_poly.as_ref().expect("Missing add_sub poly")
+    }
+
+    pub fn mul_poly_ref(&self) -> &Poly {
+        self.mul_poly.as_ref().expect("Missing mul poly")
+    }
+
+    pub fn move_mul_poly(self) -> Poly {
+        self.mul_poly.expect("Missing mul poly")
     }
 }
 
