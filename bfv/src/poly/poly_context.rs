@@ -806,7 +806,7 @@ where
         );
     }
 
-    pub fn neg(self, poly: Poly) -> Poly {
+    pub fn neg(&self, poly: &Poly) -> Poly {
         let mut coeffs = Array2::<u64>::uninit((self.moduli_count, self.degree));
 
         izip!(

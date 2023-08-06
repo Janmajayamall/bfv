@@ -1,5 +1,3 @@
-/// Try convert from Self with poly context.
-/// TODO: Implement Error
 pub trait TryFromWithPolyContext<'a>: Sized {
     type Value;
     type PolyContext;

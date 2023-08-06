@@ -236,6 +236,24 @@ impl Evaluator {
         }
     }
 
+    pub fn negate_assign(&self, c0: &mut Ciphertext) {
+        let ctx = self.params.poly_ctx(&c0.poly_type, c0.level);
+        c0.c_ref_mut().iter_mut().for_each(|p| ctx.neg_assign(p));
+        c0.seed = None;
+    }
+
+    pub fn negate(&self, c0: &Ciphertext) -> Ciphertext {
+        let ctx = self.params.poly_ctx(&c0.poly_type, c0.level);
+        let c = c0.c_ref().iter().map(|p| ctx.neg(p)).collect_vec();
+
+        Ciphertext {
+            c,
+            poly_type: c0.poly_type.clone(),
+            level: c0.level,
+            seed: None,
+        }
+    }
+
     /// c0 += c1 * poly
     pub fn fma_poly(&self, c0: &mut Ciphertext, c1: &Ciphertext, poly: &Poly) {
         let ctx = self.params.poly_ctx(&c0.poly_type, c0.level);
