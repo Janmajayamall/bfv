@@ -3,8 +3,7 @@ use std::default;
 use crate::modulus::Modulus;
 use crate::{mod_inverse_biguint, mod_inverse_biguint_u64};
 use crate::{
-    proto, secret_key::SecretKey, traits::TryFromWithPolyContext, HybridKeySwitchingParameters,
-    Poly, PolyContext, Representation,
+    proto, secret_key::SecretKey, HybridKeySwitchingParameters, Poly, PolyContext, Representation,
 };
 use crypto_bigint::rand_core::CryptoRngCore;
 use itertools::{izip, Itertools};
@@ -14,6 +13,7 @@ use num_traits::{FromPrimitive, One, ToPrimitive};
 use rand::{CryptoRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use traits::Ntt;
+use traits::{TryFromWithParameters, TryFromWithPolyContext};
 struct BVKeySwitchingKey {
     c0s: Box<[Poly]>,
     c1s: Box<[Poly]>,

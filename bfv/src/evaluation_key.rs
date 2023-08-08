@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-
+use crate::{
+    proto, rot_to_galois_element, BfvParameters, GaloisKey, RelinearizationKey, SecretKey,
+};
 use itertools::{izip, Itertools};
 use rand::{CryptoRng, RngCore};
-
-use crate::{
-    proto, rot_to_galois_element, traits::TryFromWithParameters, BfvParameters, GaloisKey,
-    RelinearizationKey, SecretKey,
-};
+use std::collections::HashMap;
+use traits::TryFromWithParameters;
 
 #[derive(Debug, PartialEq)]
 pub struct EvaluationKey {

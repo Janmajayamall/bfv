@@ -552,7 +552,7 @@ mod tests {
     #[test]
     fn test_mul_poly() {
         let mut rng = thread_rng();
-        let params = BfvParameters::default(5, 1 << 3);
+        let params = BfvParameters::default(5, 1 << 4);
 
         // gen keys
         let sk = SecretKey::random(params.degree, params.hw, &mut rng);

@@ -1,12 +1,8 @@
+use crate::{proto, BfvParameters, Poly, PolyType};
 use itertools::Itertools;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-
-use crate::{
-    proto,
-    traits::{TryFromWithParameters, TryFromWithPolyContext},
-    BfvParameters, Poly, PolyType,
-};
+use traits::{TryFromWithParameters, TryFromWithPolyContext};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ciphertext {

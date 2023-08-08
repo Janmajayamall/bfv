@@ -1,5 +1,4 @@
 use bfv::{rot_to_galois_element, *};
-use fhe_math::zq::ntt::NttOperator;
 use itertools::{izip, Itertools};
 use ndarray::Array2;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};

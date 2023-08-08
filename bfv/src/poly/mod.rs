@@ -1,8 +1,8 @@
-use crate::{convert_from_bytes, convert_to_bytes, proto, traits::TryFromWithPolyContext};
-use fhe_math::zq::ntt::NttOperator;
+use crate::{convert_from_bytes, convert_to_bytes, proto};
 use itertools::{izip, Itertools};
 use ndarray::Array2;
 pub mod poly_context;
+use traits::TryFromWithPolyContext;
 
 pub use poly_context::PolyContext;
 

@@ -1,9 +1,8 @@
 use crate::{
-    proto,
-    traits::{TryFromWithParameters, TryFromWithPolyContext},
-    BfvParameters, Ciphertext, HybridKeySwitchingKey, PolyType, Representation, SecretKey,
+    proto, BfvParameters, Ciphertext, HybridKeySwitchingKey, PolyType, Representation, SecretKey,
 };
 use rand::{CryptoRng, RngCore};
+use traits::{TryFromWithParameters, TryFromWithPolyContext};
 
 #[derive(PartialEq, Debug)]
 pub struct RelinearizationKey {

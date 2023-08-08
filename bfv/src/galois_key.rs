@@ -1,11 +1,9 @@
 use crate::{
-    proto,
-    traits::{TryFromWithParameters, TryFromWithPolyContext},
-    BfvParameters, Ciphertext, HybridKeySwitchingKey, Modulus, Poly, PolyContext, PolyType,
+    proto, BfvParameters, Ciphertext, HybridKeySwitchingKey, Modulus, Poly, PolyContext, PolyType,
     Representation, SecretKey, Substitution,
 };
 use rand::{CryptoRng, RngCore};
-
+use traits::{TryFromWithParameters, TryFromWithPolyContext};
 #[derive(Debug, PartialEq)]
 pub struct GaloisKey {
     pub(crate) substitution: Substitution,

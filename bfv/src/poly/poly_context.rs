@@ -1,7 +1,10 @@
 use crate::Poly;
-use crate::{modulus::Modulus, utils::mod_inverse_biguint_u64, Representation, Substitution};
+use crate::{
+    modulus::Modulus,
+    utils::{mod_inverse_biguint_u64, sample_vec_cbd},
+    Representation, Substitution,
+};
 use crypto_bigint::U192;
-use fhe_util::sample_vec_cbd;
 use itertools::{izip, Itertools};
 use ndarray::{azip, s, Array2, ArrayView2, Axis, IntoNdProducer};
 use num_bigint::BigUint;
