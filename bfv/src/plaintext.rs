@@ -201,6 +201,10 @@ impl Plaintext {
     pub fn move_mul_poly(self) -> Poly {
         self.mul_poly.expect("Missing mul poly")
     }
+
+    pub fn move_add_sub_poly(self) -> Poly {
+        self.add_sub_poly.expect("Missing add_sub poly")
+    }
 }
 
 #[cfg(test)]
