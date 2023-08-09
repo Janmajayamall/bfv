@@ -412,8 +412,6 @@ dependencies = [
  "bindgen",
  "cmake",
  "link-cplusplus",
- "ndarray",
- "rand",
 ]
 
 [[package]]

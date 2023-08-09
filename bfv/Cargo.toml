@@ -46,3 +46,7 @@ harness = false
 [[bench]]
 name = "bfv"
 harness = false
+
+[[bench]]
+name = "ntt"
+harness = false
