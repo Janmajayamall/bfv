@@ -2,7 +2,6 @@ use crate::{rot_to_galois_element, BfvParameters, GaloisKey, RelinearizationKey,
 use itertools::{izip, Itertools};
 use rand::{CryptoRng, RngCore};
 use std::collections::HashMap;
-use traits::TryFromWithParameters;
 
 #[derive(Debug, PartialEq)]
 pub struct EvaluationKey {

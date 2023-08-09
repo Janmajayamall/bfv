@@ -1,31 +1,21 @@
 use concrete_ntt::prime64::Plan;
-use traits::Ntt;
 
 #[derive(Debug, Clone)]
-pub struct NttOperator {
-    degree: usize,
-    prime: u64,
-    plan: Plan,
-}
+pub struct NttOperator(Plan);
 
-impl Ntt for NttOperator {
-    // use `concrete-ntt` as native ntt operator
+impl traits::Ntt for NttOperator {
     fn new(degree: usize, prime: u64) -> Self {
         let plan = Plan::try_new(degree, prime).unwrap();
-        NttOperator {
-            degree,
-            prime,
-            plan,
-        }
+        NttOperator(plan)
     }
 
     fn forward(&self, a: &mut [u64]) {
-        self.plan.fwd(a);
+        self.0.fwd(a);
     }
 
     fn backward(&self, a: &mut [u64]) {
-        self.plan.inv(a);
-        self.plan.normalize(a);
+        self.0.inv(a);
+        self.0.normalize(a);
     }
 
     fn forward_lazy(&self, a: &mut [u64]) {
@@ -35,6 +25,6 @@ impl Ntt for NttOperator {
 
 impl PartialEq for NttOperator {
     fn eq(&self, other: &Self) -> bool {
-        self.prime == other.prime && self.degree == other.degree
+        self.0.modulus() == other.0.modulus() && self.0.ntt_size() == other.0.ntt_size()
     }
 }

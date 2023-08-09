@@ -2,7 +2,6 @@ use crate::{convert_from_bytes, convert_to_bytes};
 use itertools::{izip, Itertools};
 use ndarray::Array2;
 pub mod poly_context;
-use traits::TryFromWithPolyContext;
 
 pub use poly_context::PolyContext;
 

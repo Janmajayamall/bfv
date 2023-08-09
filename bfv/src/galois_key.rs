@@ -3,7 +3,7 @@ use crate::{
     Representation, SecretKey, Substitution,
 };
 use rand::{CryptoRng, RngCore};
-use traits::{TryFromWithParameters, TryFromWithPolyContext};
+
 #[derive(Debug, PartialEq)]
 pub struct GaloisKey {
     pub(crate) substitution: Substitution,
