@@ -408,10 +408,13 @@ checksum = "443144c8cdadd93ebf52ddb4056d257f5b52c04d3c804e657d19eb73fc33668b"
 [[package]]
 name = "hexl-rs"
 version = "0.1.0"
+source = "git+https://github.com/Janmajayamall/hexl-rs.git#c2d23d6ab458b388bef337b2ed8526b07f42f081"
 dependencies = [
  "bindgen",
  "cmake",
  "link-cplusplus",
+ "ndarray",
+ "rand",
 ]
 
 [[package]]
