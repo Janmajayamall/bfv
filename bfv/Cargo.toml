@@ -17,18 +17,22 @@ crypto-bigint = "0.4.9"
 rand_chacha = "0.3.1"
 seq-macro = "0.3"
 hexl-rs = {git = "https://github.com/Janmajayamall/hexl-rs.git", optional = true}
-prost = "0.11"
-concrete-ntt = "0.1.0"
+prost = {version = "0.11", optional = true}
+concrete-ntt = {version= "0.1.0", default = false}
 traits = {path = "./../traits"}
 
 [dev-dependencies]
 criterion = "0.4"
 
 [build-dependencies]
-prost-build = "0.11.9"
+prost-build = {version = "0.11.9", optional = true}
 
 [features]
+default = ["std"]
+std = ["concrete-ntt/std"]
+nightly = ["concrete-ntt/nightly"]
 hexl = ["hexl-rs"]
+serialize = ["prost", "prost-build"]
 
 [[bench]]
 name = "modulus"

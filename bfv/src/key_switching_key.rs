@@ -3,7 +3,7 @@ use std::default;
 use crate::modulus::Modulus;
 use crate::{mod_inverse_biguint, mod_inverse_biguint_u64};
 use crate::{
-    proto, secret_key::SecretKey, HybridKeySwitchingParameters, Poly, PolyContext, Representation,
+    secret_key::SecretKey, HybridKeySwitchingParameters, Poly, PolyContext, Representation,
 };
 use crypto_bigint::rand_core::CryptoRngCore;
 use itertools::{izip, Itertools};
@@ -144,10 +144,10 @@ impl BVKeySwitchingKey {
 #[derive(Debug, PartialEq)]
 pub struct HybridKeySwitchingKey {
     // ksk_ctx is q_ctx
-    seed: Option<<ChaCha8Rng as SeedableRng>::Seed>,
+    pub(crate) seed: Option<<ChaCha8Rng as SeedableRng>::Seed>,
 
-    c0s: Box<[Poly]>,
-    c1s: Box<[Poly]>,
+    pub(crate) c0s: Box<[Poly]>,
+    pub(crate) c1s: Box<[Poly]>,
 }
 
 impl HybridKeySwitchingKey {
@@ -308,7 +308,7 @@ impl HybridKeySwitchingKey {
     }
 
     /// Generates `count` polynomials from the seed and returns them in `Coefficient` representation
-    fn generate_c1(
+    pub fn generate_c1(
         count: usize,
         qp_ctx: &PolyContext<'_>,
         seed: <ChaCha8Rng as SeedableRng>::Seed,
@@ -404,99 +404,11 @@ impl HybridKeySwitchingKey {
     }
 }
 
-impl<'a> TryFromWithPolyContext<'a> for proto::HybridKeySwitchingKey {
-    type PolyContext = PolyContext<'a>;
-    type Value = HybridKeySwitchingKey;
-    fn try_from_with_context(value: &Self::Value, poly_ctx: &'a Self::PolyContext) -> Self {
-        let c0s = value
-            .c0s
-            .iter()
-            .map(|p| {
-                // Since neither c0s nor c1s change representation to `Coefficient` form it is safe to assume
-                // that c0s polynomials will be `Evaluation` form
-                let mut p = p.clone();
-                poly_ctx.change_representation(&mut p, Representation::Coefficient);
-                proto::Poly::try_from_with_context(&p, &poly_ctx)
-            })
-            .collect_vec();
-
-        let c1s = {
-            if value.seed.is_none() {
-                value
-                    .c1s
-                    .iter()
-                    .map(|p| {
-                        let mut p = p.clone();
-                        poly_ctx.change_representation(&mut p, Representation::Coefficient);
-                        proto::Poly::try_from_with_context(&p, &poly_ctx)
-                    })
-                    .collect_vec()
-            } else {
-                vec![]
-            }
-        };
-
-        let seed = value.seed.and_then(|s| Some(s.to_vec()));
-
-        proto::HybridKeySwitchingKey { c0s, c1s, seed }
-    }
-}
-
-impl<'a> TryFromWithPolyContext<'a> for HybridKeySwitchingKey {
-    type PolyContext = PolyContext<'a>;
-    type Value = proto::HybridKeySwitchingKey;
-    fn try_from_with_context(value: &Self::Value, poly_ctx: &'a Self::PolyContext) -> Self {
-        let c0s = value
-            .c0s
-            .iter()
-            .map(|p| {
-                // c0s and c1s are only needed in `Evaluation` form so it safe to convert them
-                // from `Coefficient` (default form for serialization) to `Evaluation`.
-                let mut p = Poly::try_from_with_context(p, &poly_ctx);
-                poly_ctx.change_representation(&mut p, Representation::Evaluation);
-                p
-            })
-            .collect_vec();
-
-        let (c1s, seed) = {
-            if value.seed.is_none() {
-                assert!(value.c1s.len() == value.c0s.len());
-                let c = value
-                    .c1s
-                    .iter()
-                    .map(|p| {
-                        let mut p = Poly::try_from_with_context(p, &poly_ctx);
-                        poly_ctx.change_representation(&mut p, Representation::Evaluation);
-                        p
-                    })
-                    .collect_vec();
-                (c, None)
-            } else {
-                let mut seed = <ChaCha8Rng as SeedableRng>::Seed::default();
-                seed.copy_from_slice(value.seed());
-                // `generate_c1` returns c1s in `Coefficient` representation. Convert them to `Evaluation` representation.
-                let mut c = HybridKeySwitchingKey::generate_c1(c0s.len(), poly_ctx, seed);
-                c.iter_mut().for_each(|p| {
-                    poly_ctx.change_representation(p, Representation::Evaluation);
-                });
-                (c, Some(seed))
-            }
-        };
-
-        HybridKeySwitchingKey {
-            seed,
-            c0s: c0s.into_boxed_slice(),
-            c1s: c1s.into_boxed_slice(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::parameters::{BfvParameters, PolyType};
     use num_bigint::BigUint;
-    use prost::Message;
     use rand::thread_rng;
 
     #[test]
@@ -573,30 +485,5 @@ mod tests {
             let diff_bits = std::cmp::min(v.bits(), (ksk_ctx.big_q() - v).bits());
             dbg!(&diff_bits);
         });
-    }
-
-    #[test]
-    fn serialize_and_deserialize_hybrid_ksk() {
-        let params = BfvParameters::default(15, 1 << 8);
-        let qp_ctx = params.poly_ctx(&PolyType::QP, 0);
-        let ksk_ctx = params.poly_ctx(&PolyType::Q, 0);
-
-        let mut rng = thread_rng();
-        let poly = ksk_ctx.random(Representation::Evaluation, &mut rng);
-        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
-        let mut ksk = HybridKeySwitchingKey::new(
-            params.hybrid_key_switching_params_at_level(0),
-            &poly,
-            &sk,
-            &qp_ctx,
-            params.variance,
-            &mut rng,
-        );
-
-        let ksk_proto = proto::HybridKeySwitchingKey::try_from_with_context(&ksk, &qp_ctx);
-        dbg!(ksk_proto.encode_to_vec().len());
-        let ksk_back = HybridKeySwitchingKey::try_from_with_context(&ksk_proto, &qp_ctx);
-
-        assert_eq!(ksk, ksk_back);
     }
 }

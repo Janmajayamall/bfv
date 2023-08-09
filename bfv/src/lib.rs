@@ -9,10 +9,14 @@ mod ntt;
 mod parameters;
 mod plaintext;
 mod poly;
-mod proto;
 mod relinearization_key;
 mod secret_key;
 mod utils;
+
+#[cfg(feature = "serialize")]
+mod proto;
+#[cfg(feature = "serialize")]
+pub use proto::proto::{Ciphertext as CiphertextProto, EvaluationKey as EvaluationKeyProto};
 
 pub use ciphertext::*;
 pub use evaluation_key::*;
@@ -24,7 +28,6 @@ pub use nb_theory::*;
 pub use parameters::{HybridKeySwitchingParameters, PolyType};
 pub use plaintext::*;
 pub use poly::{Poly, Representation, Substitution};
-pub use proto::{Ciphertext as CiphertextProto, EvaluationKey as EvaluationKeyProto};
 pub use relinearization_key::*;
 pub use secret_key::*;
 pub use utils::*;

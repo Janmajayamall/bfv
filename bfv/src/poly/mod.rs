@@ -1,4 +1,4 @@
-use crate::{convert_from_bytes, convert_to_bytes, proto};
+use crate::{convert_from_bytes, convert_to_bytes};
 use itertools::{izip, Itertools};
 use ndarray::Array2;
 pub mod poly_context;
@@ -88,65 +88,9 @@ impl Poly {
     }
 }
 
-impl<'a> TryFromWithPolyContext<'a> for Poly {
-    type Value = proto::Poly;
-    type PolyContext = crate::PolyContext<'a>;
-
-    fn try_from_with_context(poly: &Self::Value, poly_ctx: &'a Self::PolyContext) -> Self {
-        let coefficients = izip!(poly.coefficients.iter(), poly_ctx.iter_moduli_ops())
-            .flat_map(|(xi, modqi)| {
-                let values = convert_from_bytes(xi, modqi.modulus());
-                assert!(values.len() == poly_ctx.degree());
-                values
-            })
-            .collect_vec();
-        let coefficients =
-            Array2::from_shape_vec((poly_ctx.moduli_count(), poly_ctx.degree()), coefficients)
-                .unwrap();
-
-        Poly {
-            coefficients,
-            representation: Representation::Coefficient,
-        }
-    }
-}
-
-impl<'a> TryFromWithPolyContext<'a> for proto::Poly {
-    type Value = Poly;
-    type PolyContext = crate::PolyContext<'a>;
-
-    fn try_from_with_context(poly: &Self::Value, poly_ctx: &'a Self::PolyContext) -> Self {
-        assert!(poly.representation == Representation::Coefficient);
-
-        let bytes = izip!(poly.coefficients.outer_iter(), poly_ctx.iter_moduli_ops())
-            .map(|(xi, modqi)| convert_to_bytes(xi.as_slice().unwrap(), modqi.modulus()))
-            .collect_vec();
-
-        proto::Poly {
-            coefficients: bytes,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::BfvParameters;
-    use prost::Message;
     use rand::thread_rng;
-
-    #[test]
-    fn serialization_and_deserialization() {
-        let params = BfvParameters::default(3, 1 << 15);
-        let ctx = params.poly_ctx(&crate::PolyType::Q, 0);
-
-        let mut rng = thread_rng();
-        let poly = ctx.random(Representation::Coefficient, &mut rng);
-        let proto = proto::Poly::try_from_with_context(&poly, &ctx);
-        let bytes = proto.encode_to_vec();
-        dbg!(bytes.len());
-        let poly_back = Poly::try_from_with_context(&proto, &ctx);
-
-        assert_eq!(poly, poly_back);
-    }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    proto, BfvParameters, Ciphertext, HybridKeySwitchingKey, Modulus, Poly, PolyContext, PolyType,
+    BfvParameters, Ciphertext, HybridKeySwitchingKey, Modulus, Poly, PolyContext, PolyType,
     Representation, SecretKey, Substitution,
 };
 use rand::{CryptoRng, RngCore};
@@ -85,42 +85,6 @@ impl GaloisKey {
             poly_type: PolyType::Q,
             level,
             seed: None,
-        }
-    }
-}
-
-impl TryFromWithParameters for proto::GaloisKey {
-    type Parameters = BfvParameters;
-    type Value = GaloisKey;
-
-    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
-        let ctx = parameters.poly_ctx(&PolyType::QP, value.level);
-        let ksk = Some(proto::HybridKeySwitchingKey::try_from_with_context(
-            &value.ksk_key,
-            &ctx,
-        ));
-        proto::GaloisKey {
-            exponent: value.substitution.exponent as u32,
-            ksk,
-            level: value.level as u32,
-        }
-    }
-}
-
-impl TryFromWithParameters for GaloisKey {
-    type Value = proto::GaloisKey;
-    type Parameters = BfvParameters;
-
-    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
-        let substitution = Substitution::new(value.exponent as usize, parameters.degree);
-        let level = value.level as usize;
-
-        let ctx = parameters.poly_ctx(&PolyType::QP, level);
-        let ksk = HybridKeySwitchingKey::try_from_with_context(&value.ksk.as_ref().unwrap(), &ctx);
-        GaloisKey {
-            substitution,
-            ksk_key: ksk,
-            level,
         }
     }
 }
