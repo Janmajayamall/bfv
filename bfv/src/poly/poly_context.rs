@@ -1040,6 +1040,7 @@ where
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{nb_theory::generate_primes_vec, BfvParameters, PolyType};
@@ -1067,7 +1068,7 @@ mod tests {
 
     #[test]
     fn substitution_works() {
-        let params = BfvParameters::default(1, 1 << 3);
+        let params = BfvParameters::default(1, 1 << 4);
 
         let ctx = params.poly_ctx(&PolyType::Q, 0);
         let mut rng = thread_rng();
@@ -1111,7 +1112,12 @@ mod tests {
 
             // substitution by [exp^-1]_(2*degree) on polynomial that was substitution bu exp
             // must result to original polynomial
-            let exp_inv = Modulus::new((2 * ctx.degree) as u64).inv(exp as u64) as usize;
+            let exp_inv = mod_inverse_biguint_u64(
+                &BigUint::from_usize(exp).unwrap(),
+                (2 * ctx.degree) as u64,
+            )
+            .to_usize()
+            .unwrap();
             let inv_subs = Substitution::new(exp_inv, params.degree);
             assert_eq!(p, ctx.substitute(&p_subs, &inv_subs));
             assert_eq!(p_ntt, ctx.substitute(&p_subs_ntt, &inv_subs));
@@ -1542,7 +1548,7 @@ mod tests {
         .for_each(|(res, expected)| {
             let diff: BigInt = res.to_bigint().unwrap() - expected.to_bigint().unwrap();
             assert!(diff <= BigInt::one());
-            // dbg!(diff);
+            dbg!(diff);
         });
     }
 }

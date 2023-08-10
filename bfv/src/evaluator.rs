@@ -363,7 +363,9 @@ impl Evaluator {
         assert!(c0.poly_type == PolyType::Q);
         let level = c0.level;
         let ctx = self.params.poly_ctx(&c0.poly_type, level);
+        dbg!(ctx.moduli_count);
         c0.c.iter_mut().for_each(|p| {
+            dbg!(p.coefficients.shape());
             ctx.mod_down_next(p, &self.params.lastq_inv_modql[level]);
         });
         c0.level = level + 1;
@@ -456,7 +458,7 @@ mod tests {
     #[test]
     fn test_mul_relinearize() {
         let mut rng = thread_rng();
-        let params = BfvParameters::default(5, 1 << 3);
+        let params = BfvParameters::default(5, 1 << 4);
 
         // gen keys
         let sk = SecretKey::random(params.degree, params.hw, &mut rng);
@@ -505,7 +507,7 @@ mod tests {
     #[test]
     fn test_add_sub_plaintext() {
         let mut rng = thread_rng();
-        let params = BfvParameters::default(5, 1 << 3);
+        let params = BfvParameters::default(5, 1 << 4);
 
         // gen keys
         let sk = SecretKey::random(params.degree, params.hw, &mut rng);
@@ -597,7 +599,7 @@ mod tests {
     fn test_rotations() {
         let mut rng = thread_rng();
         // let params = BfvParameters::default(15, 1 << 15);
-        let mut params = BfvParameters::new(&[50; 15], 65537, 1 << 15);
+        let mut params = BfvParameters::new(&[50; 3], 65537, 1 << 4);
         params.enable_hybrid_key_switching(&[50, 50, 50]);
 
         // gen keys
@@ -613,21 +615,13 @@ mod tests {
         let ct0 = evaluator.encrypt(&sk, &pt0, &mut rng);
 
         println!("Noise original: {}", evaluator.measure_noise(&sk, &ct0,));
-        // let ct_rotated = evaluator.rotate(&ct0, 1, &ek);
 
-        let mut c = ct0.clone();
-        for i in 0..250 {
-            let tmp = evaluator.rotate(&c, 1, &ek);
-            c = tmp;
-            println!("Noise {i}: {}", evaluator.measure_noise(&sk, &c,));
-        }
-
-        // println!("Noise: {}", evaluator.measure_noise(&sk, &c,));
+        let ct_rotated = evaluator.rotate(&ct0, 1, &ek);
 
         // decrypt ct01
-        // let res_m =
-        //     evaluator.plaintext_decode(&evaluator.decrypt(&sk, &ct_rotated), Encoding::default());
-        // dbg!(&res_m, &m0);
+        let res_m =
+            evaluator.plaintext_decode(&evaluator.decrypt(&sk, &ct_rotated), Encoding::default());
+        dbg!(&res_m, &m0);
     }
 
     #[test]
@@ -704,5 +698,29 @@ mod tests {
             evaluator.add_noise(&mut ct, 100);
         }
         println!("Noise after: {}", evaluator.measure_noise(&sk, &ct));
+    }
+
+    #[test]
+    fn mod_down_next() {
+        let mut rng = thread_rng();
+        let params = BfvParameters::default(10, 1 << 4);
+
+        // gen keys
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
+
+        let mut m0 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+        let evaluator = Evaluator::new(params);
+        let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
+        let mut ct0 = evaluator.encrypt(&sk, &pt0, &mut rng);
+        // evaluator.ciphertext_change_representation(&mut ct0, Representation::Coefficient);
+
+        dbg!(evaluator.measure_noise(&sk, &ct0));
+        // evaluator.mod_down_next(&mut ct0);
+        dbg!(ct0.c_ref()[0].representation());
+        evaluator.ciphertext_change_representation(&mut ct0, Representation::Evaluation);
+
+        dbg!(evaluator.measure_noise(&sk, &ct0));
     }
 }
