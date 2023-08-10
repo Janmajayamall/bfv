@@ -1128,7 +1128,7 @@ mod tests {
     // FIXME: fails in debug mode. Check fn to see why.
     fn test_scale_and_round_decryption() {
         let mut rng = thread_rng();
-        let params = BfvParameters::default(10, 1 << 3);
+        let params = BfvParameters::default(10, 1 << 4);
 
         let top_context = params.poly_ctx(&PolyType::Q, 0);
         let mut q_poly = top_context.random(Representation::Coefficient, &mut rng);

@@ -140,7 +140,7 @@ where
         plaintext_modulus: u64,
         degree: usize,
     ) -> BfvParameters<T> {
-        assert!(degree.is_power_of_two());
+        assert!(degree.is_power_of_two() && degree >= 16);
 
         // generate Q moduli chain
         let ciphertext_moduli = generate_primes_vec(ciphertext_moduli_sizes, degree, &[]);

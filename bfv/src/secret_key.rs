@@ -1,5 +1,5 @@
 use crate::plaintext::{Encoding, Plaintext};
-use crate::{BfvParameters, Ciphertext, PolyType};
+use crate::{BfvParameters, Ciphertext, PolyCache, PolyType};
 use crate::{Poly, PolyContext, Representation};
 use itertools::Itertools;
 use rand::distributions::{Distribution, Uniform};
@@ -184,7 +184,7 @@ impl SecretKey {
         // TODO: replace default simd with encoding used for ciphertext. This will require
         // adding encoding info to ciphertext
         let m = self.decrypt(ct, params).decode(Encoding::default(), params);
-        let scaled_m = Plaintext::encode(&m, &params, Encoding::default())
+        let scaled_m = Plaintext::encode(&m, &params, Encoding::simd(ct.level(), PolyCache::None))
             .scale_plaintext(&params, Representation::Evaluation);
 
         let ctx = params.poly_ctx(&ct.poly_type, ct.level);

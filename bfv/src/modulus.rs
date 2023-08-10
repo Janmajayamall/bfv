@@ -647,6 +647,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn barret_reduction_u128_perf() {
         let mut rng = thread_rng();
         let prime = 1152921504606846577u64;

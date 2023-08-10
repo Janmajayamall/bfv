@@ -363,9 +363,7 @@ impl Evaluator {
         assert!(c0.poly_type == PolyType::Q);
         let level = c0.level;
         let ctx = self.params.poly_ctx(&c0.poly_type, level);
-        dbg!(ctx.moduli_count);
         c0.c.iter_mut().for_each(|p| {
-            dbg!(p.coefficients.shape());
             ctx.mod_down_next(p, &self.params.lastq_inv_modql[level]);
         });
         c0.level = level + 1;
@@ -625,6 +623,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Takes long because degree is set to 2^15"]
     fn test_mul_lazy_add_and_relinearize() {
         let mut rng = thread_rng();
         let params = BfvParameters::default(15, 1 << 15);
@@ -682,7 +681,7 @@ mod tests {
     #[test]
     fn add_noise_works() {
         let mut rng = thread_rng();
-        let params = BfvParameters::default(15, 1 << 3);
+        let params = BfvParameters::default(15, 1 << 4);
 
         let sk = SecretKey::random(params.degree, params.hw, &mut rng);
         let mut m0 = params
@@ -714,13 +713,9 @@ mod tests {
         let evaluator = Evaluator::new(params);
         let pt0 = evaluator.plaintext_encode(&m0, Encoding::default());
         let mut ct0 = evaluator.encrypt(&sk, &pt0, &mut rng);
-        // evaluator.ciphertext_change_representation(&mut ct0, Representation::Coefficient);
 
-        dbg!(evaluator.measure_noise(&sk, &ct0));
-        // evaluator.mod_down_next(&mut ct0);
-        dbg!(ct0.c_ref()[0].representation());
-        evaluator.ciphertext_change_representation(&mut ct0, Representation::Evaluation);
-
-        dbg!(evaluator.measure_noise(&sk, &ct0));
+        let noise_before = evaluator.measure_noise(&sk, &ct0);
+        evaluator.mod_down_next(&mut ct0);
+        assert!(evaluator.measure_noise(&sk, &ct0) <= noise_before);
     }
 }
