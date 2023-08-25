@@ -145,7 +145,17 @@ impl Modulus {
 
     pub fn neg_mod_fast(&self, a: u64) -> u64 {
         debug_assert!(a < self.modulus);
-        self.modulus - a
+
+        #[cfg(debug_assertions)]
+        {
+            if a == 0 {
+                return 0;
+            } else {
+                return self.modulus - a;
+            }
+        };
+
+        return self.modulus - a;
     }
 
     /// Naive modulus multiplication. Uses %

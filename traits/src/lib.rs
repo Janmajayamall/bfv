@@ -23,3 +23,25 @@ pub trait TryFromWithParameters: Sized {
 
     fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self;
 }
+
+pub trait TryEncodingWithParameters<V>: Sized {
+    type Parameters;
+    type Encoding;
+
+    fn try_encoding_with_parameters(
+        value: V,
+        parameters: &Self::Parameters,
+        encoding: Self::Encoding,
+    ) -> Self;
+}
+
+pub trait TryDecodingWithParameters<V>: Sized {
+    type Parameters;
+    type Encoding;
+
+    fn try_decoding_with_parameters(
+        value: V,
+        parameters: Self::Parameters,
+        encoding: Self::Encoding,
+    ) -> Self;
+}

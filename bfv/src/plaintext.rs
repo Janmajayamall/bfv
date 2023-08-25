@@ -1,6 +1,9 @@
 use crate::poly::{Poly, Representation};
-use crate::{BfvParameters, PolyType};
-use traits::Ntt;
+use crate::{BfvParameters, Ciphertext, PolyType};
+use itertools::Itertools;
+use ndarray::ArrayView1;
+use num_traits::{AsPrimitive, FromPrimitive, Unsigned, Zero};
+use traits::{Ntt, TryDecodingWithParameters, TryEncodingWithParameters};
 
 #[derive(PartialEq, Clone)]
 pub enum EncodingType {
@@ -66,7 +69,6 @@ impl Plaintext {
         let mut m1 = vec![0u64; params.degree];
         let mut m = m.to_vec();
 
-        params.plaintext_modulus_op.reduce_vec(&mut m);
         m.iter().enumerate().for_each(|(i, v)| {
             if encoding.encoding_type == EncodingType::Simd {
                 m1[params.matrix_reps_index_map[i]] = *v;
@@ -74,6 +76,7 @@ impl Plaintext {
                 m1[i] = *v;
             }
         });
+        params.plaintext_modulus_op.reduce_vec(&mut m1);
 
         if encoding.encoding_type == EncodingType::Simd {
             params.plaintext_ntt_op.backward(&mut m1);
@@ -116,7 +119,11 @@ impl Plaintext {
         }
     }
 
-    pub fn decode(&self, encoding: Encoding, params: &BfvParameters) -> Vec<u64> {
+    pub fn decode<T: Zero + Clone + FromPrimitive>(
+        &self,
+        encoding: Encoding,
+        params: &BfvParameters,
+    ) -> Vec<T> {
         assert!(self.encoding.is_none());
 
         let mut m1 = self.m.clone();
@@ -124,12 +131,12 @@ impl Plaintext {
             params.plaintext_ntt_op.forward(&mut m1);
         }
 
-        let mut m = vec![0u64; params.degree];
+        let mut m = vec![T::zero(); params.degree];
         for i in (0..params.degree) {
             if encoding.encoding_type == EncodingType::Simd {
-                m[i] = m1[params.matrix_reps_index_map[i]];
+                m[i] = T::from_u64(m1[params.matrix_reps_index_map[i]]).unwrap();
             } else {
-                m[i] = m1[i];
+                m[i] = T::from_u64(m1[i]).unwrap();
             }
         }
 
@@ -204,6 +211,47 @@ impl Plaintext {
 
     pub fn move_add_sub_poly(self) -> Poly {
         self.add_sub_poly.expect("Missing add_sub poly")
+    }
+}
+
+impl TryEncodingWithParameters<&[u32]> for Plaintext {
+    type Encoding = Encoding;
+    type Parameters = BfvParameters;
+
+    fn try_encoding_with_parameters(
+        value: &[u32],
+        parameters: &Self::Parameters,
+        encoding: Self::Encoding,
+    ) -> Self {
+        let value_u64 = value.iter().map(|v| *v as u64).collect_vec();
+        Self::encode(&value_u64, parameters, encoding)
+    }
+}
+
+impl<'a> TryEncodingWithParameters<ArrayView1<'a, u32>> for Plaintext {
+    type Encoding = Encoding;
+    type Parameters = BfvParameters;
+
+    fn try_encoding_with_parameters(
+        value: ArrayView1<'a, u32>,
+        parameters: &Self::Parameters,
+        encoding: Self::Encoding,
+    ) -> Self {
+        let value_u64 = value.iter().map(|v| *v as u64).collect_vec();
+        Self::encode(&value_u64, parameters, encoding)
+    }
+}
+
+impl<'a> TryDecodingWithParameters<&'a Plaintext> for Vec<u32> {
+    type Encoding = Encoding;
+    type Parameters = &'a BfvParameters;
+
+    fn try_decoding_with_parameters(
+        value: &'a Plaintext,
+        parameters: Self::Parameters,
+        encoding: Self::Encoding,
+    ) -> Vec<u32> {
+        value.decode(encoding, parameters)
     }
 }
 
