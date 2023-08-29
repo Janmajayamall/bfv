@@ -55,13 +55,9 @@ impl Modulus {
     ///
     /// modulus must be prime
     pub fn inv(&self, a: u64) -> u64 {
-        assert!(probably_prime(&BigUint::from(self.modulus), 0));
-        assert!(a < self.modulus);
-        if a == 0 {
-            0
-        } else {
-            self.exp(a, (self.modulus - 2) as usize)
-        }
+        debug_assert!(probably_prime(&BigUint::from(self.modulus), 0));
+        debug_assert!(a < self.modulus);
+        self.exp(a, (self.modulus - 2) as usize)
     }
 
     /// Computes shoup representation
