@@ -6,7 +6,7 @@ use rand::distributions::{Distribution, Uniform};
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct SecretKey {
     pub(crate) coefficients: Box<[i64]>,
 }

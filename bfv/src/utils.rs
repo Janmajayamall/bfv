@@ -1,4 +1,5 @@
 use crate::Modulus;
+use itertools::Itertools;
 use num_bigint::BigUint;
 use num_bigint_dig::{BigUint as BigUintDig, ModInverse};
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -54,9 +55,68 @@ pub fn mod_inverse_biguint(a: &BigUint, m: &BigUint) -> BigUint {
     )
 }
 
+pub fn convert_ternary_to_bytes(values: &[i64]) -> Vec<u8> {
+    // map ternary distrubtion {-1,0,1} to {2,0,1}
+    let values = values
+        .iter()
+        .map(|v| if *v == -1 { 2u64 } else { *v as u64 })
+        .collect_vec();
+
+    let bits = 2;
+    let mask = (1u64 << bits) - 1;
+
+    let mut bytes = vec![];
+
+    let mut value_index = 0;
+    let mut curr_byte = 0u8;
+    while value_index != values.len() {
+        // since 8/2 = 4, a byte can fit 4 2 bit values.
+        for i in 0..4 {
+            curr_byte |= ((values[value_index] & mask) << (i * 2)) as u8;
+            value_index += 1;
+
+            if value_index >= values.len() {
+                // if curr_byte holds some value, then append it
+                if i != 0 {
+                    bytes.push(curr_byte);
+                }
+                break;
+            }
+        }
+        bytes.push(curr_byte);
+        curr_byte = 0;
+    }
+
+    bytes
+}
+
+pub fn convert_bytes_to_ternary(bytes: &[u8], length: usize) -> Vec<i64> {
+    // extract 4 2 bits value from each byte
+    let mut values = vec![];
+    let bits = 2;
+    let mask = (1u8 << bits) - 1;
+    bytes.iter().for_each(|v| {
+        for i in 0..4 {
+            values.push((*v >> (i * 2)) & mask);
+        }
+    });
+
+    // map {2,0,1} to {-1,0,1}
+    let values = values
+        .iter()
+        .take(length)
+        .map(|v| if *v == 2 { -1i64 } else { *v as i64 })
+        .collect_vec();
+
+    values
+}
+
 pub fn convert_to_bytes(values: &[u64], modulus: u64) -> Vec<u8> {
     let bits = 64 - modulus.leading_zeros();
     let mask = (1 << bits) - 1;
+
+    // we assume that modulus has atleast 8 bits
+    assert!(bits >= 8);
 
     let bytes_count = ((bits as usize * values.len()) as f64 / 8.0).ceil() as usize;
     let mut bytes = Vec::with_capacity(bytes_count);

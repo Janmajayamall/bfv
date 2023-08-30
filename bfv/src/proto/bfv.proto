@@ -4,6 +4,10 @@ message Poly {
     repeated bytes coefficients = 1; 
 }
 
+message SecretKey { 
+    bytes coefficients = 1;
+}
+
 message Ciphertext { 
     repeated Poly c = 1;
     uint32 level = 2;

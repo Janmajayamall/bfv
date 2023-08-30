@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    convert_from_bytes, convert_to_bytes, BfvParameters, Ciphertext, EvaluationKey, GaloisKey,
-    HybridKeySwitchingKey, Poly, PolyContext, PolyType, RelinearizationKey, Representation,
-    Substitution,
+    convert_bytes_to_ternary, convert_from_bytes, convert_ternary_to_bytes, convert_to_bytes,
+    BfvParameters, Ciphertext, EvaluationKey, GaloisKey, HybridKeySwitchingKey, Poly, PolyContext,
+    PolyType, RelinearizationKey, Representation, SecretKey, Substitution,
 };
 use itertools::{izip, Itertools};
 use ndarray::Array2;
@@ -53,6 +53,31 @@ impl<'a> TryFromWithPolyContext<'a> for proto::Poly {
         proto::Poly {
             coefficients: bytes,
         }
+    }
+}
+
+// SecretKey //
+impl TryFromWithParameters for proto::SecretKey {
+    type Value = SecretKey;
+    type Parameters = BfvParameters;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        let bytes = convert_ternary_to_bytes(&value.coefficients);
+        proto::SecretKey {
+            coefficients: bytes,
+        }
+    }
+}
+
+impl TryFromWithParameters for SecretKey {
+    type Parameters = BfvParameters;
+    type Value = proto::SecretKey;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        let coefficients =
+            convert_bytes_to_ternary(&value.coefficients, parameters.degree).into_boxed_slice();
+
+        SecretKey { coefficients }
     }
 }
 
@@ -353,6 +378,19 @@ mod tests {
     use crate::{Encoding, Evaluator, SecretKey};
     use prost::Message;
     use rand::thread_rng;
+
+    #[test]
+    fn serialize_and_deserialize_secret_key() {
+        let mut rng = thread_rng();
+        let params = BfvParameters::default(5, 1 << 4);
+
+        let sk = SecretKey::random_with_params(&params, &mut rng);
+
+        let sk_proto = proto::SecretKey::try_from_with_parameters(&sk, &params);
+        let sk_back = SecretKey::try_from_with_parameters(&sk_proto, &params);
+
+        assert_eq!(sk, sk_back);
+    }
 
     #[test]
     fn serialize_and_deserialize_ciphertexts() {
