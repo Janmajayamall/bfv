@@ -16,7 +16,9 @@ mod utils;
 #[cfg(feature = "serialize")]
 mod proto;
 #[cfg(feature = "serialize")]
-pub use proto::proto::{Ciphertext as CiphertextProto, EvaluationKey as EvaluationKeyProto};
+pub use proto::proto::{
+    Ciphertext as CiphertextProto, EvaluationKey as EvaluationKeyProto, SecretKey as SecretKeyProto,
+};
 
 pub use ciphertext::*;
 pub use evaluation_key::*;
