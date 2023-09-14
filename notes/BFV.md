@@ -3,7 +3,7 @@
 
 Search LWE 
 
-Let's parameterise RLWE with a power of 2 $N$, standard deviation $\sigma$, and $Q \in Z_+$. 
+Let's parameterise RLWE with a power of 2 $N$, standard deviation $\sigma$, and $Q \in Z^+$. 
 
 Also note
 1. $R_Q = Z_Q / (X^N + 1)$. Where $X^N + 1$  is $2N^{th}$ cyclotimic polynomial. This implies $R_Q$ is a cyclotomic field, thus a polynomial in $R_Q$ can be viewed as a polynomial in $R = Z/(X^N + 1)$ with its coefficients reduced $\mod Q$. 
@@ -77,6 +77,7 @@ $$B = As + e + \Delta m$$
 requires secret key $s$ for encryption. For a public key encryption scheme we require a way to encrypt message to someone without their secret key. 
 
 **Zero encryption as public key**
+
 Public key $pk$ is set to: 
 $$pk = (B, -A) = (As + e, -A)$$
 $pk$ is simply a zero encryption under secret $s$.
@@ -90,6 +91,7 @@ Notice that both $ct_0$ and $ct_1$ are RLWE sample under ephemeral secret $u$. T
 It is vital to not reuse $u$ during public key encryption, otherwise you will risk revealing the $pk$ of intended recipient by publishing more than intended no. of RLWE samples for given security parameter. 
 
 **Decryption**
+
 Given access to $s$ and $ct$, decryption is:
 $$ct_0 + ct_1 \cdot s = \Delta m + u\cdot pk_0 + e_0 + s\cdot u\cdot pk_1 + s\cdot e_1$$
 $$= \Delta m + uAs + ue + e_0 - uAs + se_1$$
@@ -99,5 +101,9 @@ $$m = round(\frac{t (\Delta m + v)}{Q})$$
 We will get $m$ after scaling down as long as $e < \frac{Q}{2t} - \frac{1}{2}$.
 
 Note: If you are wondering why use ephemeral keys, you must notice that it is required (& probably simplest way) to achieve property of hiding $pk$. Trivially adding $\Delta m$ to $pk$, that is $ct = (pk_0 + \Delta m, pk_1)$ will reveal $pk_1$, thus identity of to whom the $ct$ is encrypted. 
+
+**Reducing noise in ciphertext after encrypting with public key**
+
+Notice that noise in fresh ciphertext is higher, equal to $v$, when encrypted using $pk$ instead of $sk$. Given $Q$ there's no option to get rid of $v$ without sacrificing security. However, in case of hybrid key switching (or GHS variant of key switching) we measure security using modulus $PQ$ instead of just $Q$. The trick to reduce $v$ relies on setting $pk$ modulus $PQ$ and then calculate (ie mod switch) $[\frac{Q}{QP}ct]_Q$, thus reducing the noise by factor of $P$. 
 
 
