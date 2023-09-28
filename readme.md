@@ -1,4 +1,13 @@
-A work in progress
+# BFV
+
+BFV is fully homomorphic encryption library that implementas [HPS](https://eprint.iacr.org/2018/117.pdf) RNS variant of BFV (Brakerski/ Fan-Vercauteren) scheme. The library intends to be performant and comparable to existing C/C++ FHE libraries with support for BFV scheme.
+
+There's no plan, as of yet, to add support for other FHE schemes (ex, CKKS). But we are open to changing our minds.
+
+Checkout [examples](./bfv/examples/) to get started or projects like [Oblivious message retrieval](https://github.com/Janmajayamall/ObliviousMessageRetrieval) and [ULPSI (Unbalance labelled private set intersection)](https://github.com/Janmajayamall/ulpsi) to get a sense of how to use the library.
+
+> [!NOTE]
+> Open to better name suggestions!
 
 ### Features
 
@@ -15,3 +24,17 @@ With `hexl` (only on x86) you can accelerate modulus operation using [hexl](http
 For best performance on x86 either use (1) `hexl-ntt` and `hexl` together OR (2) `nightly` and `hexl` together.
 
 Note that both `concrete-ntt/nightly` and `hexl-ntt` use AVX512 instruction set to accelerate NTT operations and their performance does not differ.
+
+### Contact
+
+1. Email: janmajayamall@caird.xyz
+2. Telegram: @janmajayamall
+
+Feel free to reach out for questions/collaboration.
+
+## References
+
+1. https://eprint.iacr.org/2018/117.pdf
+2. https://eprint.iacr.org/2021/204.pdf
+3. [FHE.rs](https://github.com/tlepoint/fhe.rs)
+4. [OpenFHE](https://github.com/openfheorg/openfhe-development)
