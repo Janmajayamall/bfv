@@ -35,6 +35,10 @@ hexl = ["hexl-rs"]
 hexl-ntt = ["hexl-rs"]
 serialize = ["prost", "prost-build"]
 
+[[bin]]
+name = "basic-ops"
+path = "./examples/basic-ops.rs"
+
 [[bench]]
 name = "modulus"
 harness = false
@@ -50,11 +54,3 @@ harness = false
 [[bench]]
 name = "ntt"
 harness = false
-
-[[example]]
-name = "basic-ops"
-path = "./examples/basic-ops.rs"
-
-[[example]]
-name = "rotations"
-path = "./examples/rotations.rs"

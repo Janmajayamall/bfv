@@ -121,19 +121,20 @@ impl Evaluator {
         // now = std::time::Instant::now();
         // tensor
         // c00 * c10
-        let c_r0 = pq_ctx.mul(&c00, &c10);
+        let c_r0 = pq_ctx.mul(&c00, &c10); // r00
+        let c_r2 = pq_ctx.mul(&c01, &c11); // r02
 
-        // c00 * c11 + c01 * c10
-        pq_ctx.mul_assign(&mut c00, &c11);
-        pq_ctx.mul_assign(&mut c10, &c01);
-        pq_ctx.add_assign(&mut c00, &c10);
+        pq_ctx.add_assign(&mut c00, &c01);
+        pq_ctx.add_assign(&mut c10, &c11);
+        pq_ctx.mul_assign(&mut c00, &c10); // r02
 
-        // c01 * c11
-        pq_ctx.mul_assign(&mut c01, &c11);
+        let sum_r0r2 = pq_ctx.add(&c_r0, &c_r2);
+        pq_ctx.sub_assign(&mut c00, &sum_r0r2); // r00
+
         // println!("Tensor {:?}", now.elapsed());
 
         Ciphertext {
-            c: vec![c_r0, c00, c01],
+            c: vec![c_r0, c00, c_r2],
             poly_type: PolyType::PQ,
             level: level,
             seed: None,
