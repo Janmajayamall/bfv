@@ -106,8 +106,7 @@ impl TryFromWithParameters for proto::Ciphertext {
             .iter()
             .map(|p| {
                 // Avoid converting polynomial to `Coefficient` representation to allow
-                // assert in `Poly` to fail. This also avoids adding silent NTTs of which
-                // user of the API isn't aware.
+                // assert in `Poly` to fail. This avoids adding hidden NTTs.
                 proto::Poly::try_from_with_context(p, &poly_ctx)
             })
             .collect_vec();
@@ -227,11 +226,7 @@ impl<'a> TryFromWithPolyContext<'a> for HybridKeySwitchingKey {
             } else {
                 let mut seed = <ChaCha8Rng as SeedableRng>::Seed::default();
                 seed.copy_from_slice(value.seed());
-                // `generate_c1` returns c1s in `Coefficient` representation. Convert them to `Evaluation` representation.
-                let mut c = HybridKeySwitchingKey::generate_c1(c0s.len(), poly_ctx, seed);
-                c.iter_mut().for_each(|p| {
-                    poly_ctx.change_representation(p, Representation::Evaluation);
-                });
+                let c = HybridKeySwitchingKey::generate_c1(c0s.len(), poly_ctx, seed);
                 (c, Some(seed))
             }
         };

@@ -11,11 +11,18 @@ use traits::Ntt;
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum PolyType {
+    /// Ciphertext Modulus
     Q,
+    /// Extension Modulus (for ciphertext multiplication)
     P,
+    /// Union of extention modulus `P` and ciphertext modulus `Q`
     PQ,
+    /// Special Modulus (for Hybrid key swiching)
     SpecialP,
+    /// Union of ciphertext modulus `Q` and special modulus `SpecialP`
     QP,
+    /// Union of ciphertext modulus `Q` and Pke extension modulus `r`
+    Qr,
 }
 
 #[derive(PartialEq, Clone, Debug)]
@@ -97,6 +104,12 @@ pub struct BfvParameters<T: Ntt> {
 
     // Mod Down //
     pub lastq_inv_modql: Vec<Vec<u64>>,
+
+    // Public Key Parameters //
+    pub r: Option<u64>,
+    pub mod_r: Option<Modulus>,
+    pub ntt_r: Option<T>,
+    pub pke_parameters: Option<PkeParameters>,
 }
 
 impl<T> BfvParameters<T>
@@ -215,7 +228,7 @@ where
             ql_hat_inv.push(q_hat_inv);
         }
 
-        // ENCRYPTION //
+        // SECRET KEY ENCRYPTION //
         let mut ql_modt = vec![];
         let mut neg_t_inv_modql = vec![];
         for i in 0..q_size {
@@ -235,6 +248,11 @@ where
             ctx.change_representation(&mut neg_t_inv_modq, Representation::Evaluation);
             neg_t_inv_modql.push(neg_t_inv_modq);
         }
+
+        // PUBLIC KEY ENCRYPTION //
+        // let q_level0 = &ql[0];
+        // let pke_ql_modt.push((q_level0 % plaintext_modulus).to_u64();
+        // let neg_t_inv_modq = mod_inverse_biguint(&(q - plaintext_modulus), &q);
 
         // DECRYPTION //
         let b_bits = ciphertext_moduli_sizes.iter().max().unwrap() / 2;
@@ -589,6 +607,12 @@ where
 
             // Mod down next //
             lastq_inv_modql,
+
+            // Pke //
+            pke_parameters: None,
+            mod_r: None,
+            ntt_r: None,
+            r: None,
         }
     }
 
@@ -633,6 +657,32 @@ where
             .collect_vec();
 
         self.hybrid_ksk_parameters = Some(params);
+    }
+
+    pub fn enable_pke(&mut self) {
+        assert!(self.pke_parameters.is_none(), "Pke already enabled");
+
+        assert!(
+            self.special_moduli.is_some(),
+            "PKE is disabled unless Hybrid key switching is enabled"
+        );
+
+        // TODO: is it necessary to take the maximum of special primes?
+        let r = self
+            .special_moduli
+            .as_ref()
+            .unwrap()
+            .iter()
+            .max()
+            .unwrap()
+            .clone();
+
+        let pke_params = PkeParameters::new(&self, r);
+
+        self.pke_parameters = Some(pke_params);
+        self.mod_r = Some(Modulus::new(r));
+        self.ntt_r = Some(T::new(self.degree, r));
+        self.r = Some(r);
     }
 
     pub fn poly_ctx(&self, poly_type: &PolyType, level: usize) -> PolyContext<'_, T> {
@@ -698,6 +748,22 @@ where
                 };
                 tmp
             }
+            PolyType::Qr => {
+                assert_eq!(level, 0, "PolyType::Qr is only valid at level 0");
+
+                PolyContext {
+                    moduli_ops: (
+                        &self.ciphertext_moduli_ops,
+                        std::slice::from_ref(self.mod_r.as_ref().expect("Pke is disabled")),
+                    ),
+                    ntt_ops: (
+                        &self.ciphertext_ntt_ops,
+                        std::slice::from_ref(self.ntt_r.as_ref().expect("Pke is disabled")),
+                    ),
+                    moduli_count: level_index + 1,
+                    degree: self.degree,
+                }
+            }
         }
     }
 
@@ -714,6 +780,7 @@ where
     pub fn default(moduli_count: usize, polynomial_degree: usize) -> BfvParameters<T> {
         let mut params = BfvParameters::new(&vec![50; moduli_count], 65537, polynomial_degree);
         params.enable_hybrid_key_switching(&[50, 50, 50]);
+        params.enable_pke();
         params
     }
 }
@@ -879,6 +946,68 @@ impl HybridKeySwitchingParameters {
             p_hat_inv_modp,
             p_hat_modq,
             p_inv_modq,
+        }
+    }
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct PkeParameters {
+    pub(crate) r: u64,
+    pub(crate) qr_mod_t: u64,
+    pub(crate) neg_t_inv_modqr: Poly,
+    pub(crate) r_inv_modq: Vec<u64>,
+}
+
+impl PkeParameters {
+    /// Precomputes necessary values for public key encryption.
+    /// r: extension modulus
+    /// Qr = Q U r
+    pub fn new<T>(params: &BfvParameters<T>, r: u64) -> PkeParameters
+    where
+        T: Ntt,
+    {
+        let mut qr_moduli = params.ciphertext_moduli.to_owned();
+        qr_moduli.push(r);
+
+        let mut Qr = BigUint::one();
+        qr_moduli.iter().for_each(|q| {
+            Qr *= *q;
+        });
+
+        // Precomputes to convert [m]_t to [round(Qr([m]_t)/t)]_Qr.
+        // Uses remark 3.1 of 2021/204 to convert directly in RNS.
+
+        // [Qr]_t
+        let qr_mod_t = (&Qr % params.plaintext_modulus).to_u64().unwrap();
+
+        // [-t^{-1}]_Qr
+        let neg_t_inv_modqr = mod_inverse_biguint(&(&Qr - params.plaintext_modulus), &Qr);
+
+        let modr = Modulus::new(r);
+        let nttr = T::new(params.degree, r);
+        let ctx = PolyContext {
+            moduli_ops: (&params.ciphertext_moduli_ops, &[modr]),
+            ntt_ops: (&params.ciphertext_ntt_ops, &[nttr]),
+            moduli_count: qr_moduli.len(),
+            degree: params.degree,
+        };
+        let mut neg_t_inv_modqr =
+            ctx.try_convert_from_biguint(&[neg_t_inv_modqr], Representation::Coefficient);
+        ctx.change_representation(&mut neg_t_inv_modqr, Representation::Evaluation);
+
+        // Precompute to convert polynoial [X]_Qr to [1/r(X)]_Q. This is required to convert ciphertext encrypted using PK from basis Qr to Q while scaling error down by r.
+        // [r^-1]_qi
+        let r_inv_modq = params
+            .ciphertext_moduli_ops
+            .iter()
+            .map(|modqi| modqi.inv(r % modqi.modulus()))
+            .collect_vec();
+
+        PkeParameters {
+            r,
+            qr_mod_t,
+            neg_t_inv_modqr,
+            r_inv_modq,
         }
     }
 }

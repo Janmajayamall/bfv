@@ -165,13 +165,7 @@ impl HybridKeySwitchingKey {
         let mut seed = <ChaCha8Rng as SeedableRng>::Seed::default();
         rng.fill_bytes(&mut seed);
 
-        let mut c1s = Self::generate_c1(ksk_params.dnum, &qp_ctx, seed);
-        // `generate_c1` returns polynomials in `Coefficient` repr but c1s are only used in `Evaluation` repr
-        // so it is safe to convert them to `Evaluation`.
-        c1s.iter_mut().for_each(|p| {
-            qp_ctx.change_representation(p, Representation::Evaluation);
-        });
-
+        let c1s = Self::generate_c1(ksk_params.dnum, &qp_ctx, seed);
         let c0s = Self::generate_c0(&qp_ctx, &c1s, &ksk_params.g, &poly, &sk, variance, rng);
 
         HybridKeySwitchingKey {
@@ -305,15 +299,16 @@ impl HybridKeySwitchingKey {
         (c0_out, c1_out)
     }
 
-    /// Generates `count` polynomials from the seed and returns them in `Coefficient` representation
+    /// Generates `count` polynomials from the seed
     pub fn generate_c1(
         count: usize,
         qp_ctx: &PolyContext<'_>,
         seed: <ChaCha8Rng as SeedableRng>::Seed,
     ) -> Vec<Poly> {
+        let mut prng = ChaCha8Rng::from_seed(seed);
         (0..count)
             .into_iter()
-            .map(|_| qp_ctx.random_with_seed(seed))
+            .map(|_| qp_ctx.random(Representation::Evaluation, &mut prng))
             .collect_vec()
     }
 

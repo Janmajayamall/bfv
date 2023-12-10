@@ -105,7 +105,7 @@ impl SecretKey {
         let ctx = params.poly_ctx(&PolyType::Q, encoding.level);
         let mut sk_poly = self.to_poly(&ctx);
 
-        let m = pt.scale_plaintext(params, Representation::Evaluation);
+        let m = Plaintext::scale_m(&pt.m, params, &encoding, Representation::Evaluation);
 
         // seed `a`
         let mut seed = <ChaCha8Rng as SeedableRng>::Seed::default();
@@ -184,8 +184,13 @@ impl SecretKey {
         // TODO: replace default simd with encoding used for ciphertext. This will require
         // adding encoding info to ciphertext
         let m = self.decrypt(ct, params).decode(Encoding::default(), params);
-        let scaled_m = Plaintext::encode(&m, &params, Encoding::simd(ct.level(), PolyCache::None))
-            .scale_plaintext(&params, Representation::Evaluation);
+        let pt = Plaintext::encode(&m, &params, Encoding::simd(ct.level(), PolyCache::None));
+        let scaled_m = Plaintext::scale_m(
+            &pt.m,
+            &params,
+            &pt.encoding.unwrap(),
+            Representation::Evaluation,
+        );
 
         let ctx = params.poly_ctx(&ct.poly_type, ct.level);
 

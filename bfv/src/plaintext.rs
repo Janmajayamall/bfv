@@ -143,7 +143,9 @@ impl Plaintext {
         m
     }
 
-    /// Returns message polynomial `m` scaled by Q/t
+    /// Returns scaled polynomial `[round((Ql*[m]_t)/t)]_Ql`
+    ///
+    /// With remark 3.1 of https://eprint.iacr.org/2021/204.pdf one can calculate `round(Qm/t)` directly in RNS as [[Qlm]_t * [-t^{-1}]_Ql]_Ql
     ///
     /// Panics if encoding is not specified
     pub fn scale_m(
@@ -173,11 +175,6 @@ impl Plaintext {
         }
 
         m_poly
-    }
-
-    pub fn scale_plaintext(&self, params: &BfvParameters, representation: Representation) -> Poly {
-        let encoding = self.encoding.as_ref().expect("Plaintext missing encoding.");
-        Plaintext::scale_m(&self.m, params, encoding, representation)
     }
 
     pub fn mul_poly_type(&self) -> PolyType {
