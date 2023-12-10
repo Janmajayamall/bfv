@@ -252,9 +252,12 @@ where
         t_values
     }
 
-    /// Assumes the polynomial is in context with modulus PQ, and the out_context is either P or Q
+    /// Assumes the polynomial has basis PQ, and the out_context corresponds to either basis P or basis Q.
     ///
-    /// If out_context is P, scales the polynomial by t/Q otherwise scales the polynomial by t/P
+    /// If out_context corresponds to basis P, scales the polynomial by t/Q otherwise scales the polynomial by t/P.
+    ///
+    /// Implements Complex scaling of https://eprint.iacr.org/2018/117.pdf (Section 2.4).
+    /// Notice that since we scale by basis that is not the output basis, we don't need to extend the basis (i.e. step 2)
     pub fn scale_and_round(
         &self,
         pq_poly: &Poly,
@@ -381,12 +384,19 @@ where
 
                 for i in 0..q_size {
                     let modqi = modqs.get_unchecked(i);
+                    // [-P(q/q_i)^-1]_q_i
                     let op = *neg_pq_hat_inv_modq.get_unchecked(i);
                     let op_shoup = *neg_pq_hat_inv_modq_shoup.get_unchecked(i);
+
+                    // 1 / q_i
                     let qi_inv = q_inv.get_unchecked(i);
                     seq!(N in 0..8 {
+                        // [x_i * [-P(q/q_i)^-1]_q_i]_q_i
                         let tmp~N = modqi.mul_mod_shoup(*q_poly.coefficients.uget((i, ri+N)), op, op_shoup);
+
+                        // u += [x_i * [-P(q/q_i)^-1]_q_i]_q_i * (1/q_i)
                         nu~N += tmp~N as f64 * qi_inv;
+
                         uninit_xiv.get_unchecked_mut(i*8+N).write(tmp~N);
                     });
                 }
@@ -403,6 +413,7 @@ where
                     for i in 0..q_size {
                         let op = *q_inv_modp.uget((j, i)) as u128;
 
+                        // \sum [x_i * [-P(q/q_i)^-1]_q_i]_q_i * [q_i^(-1)]_p_j
                         seq!(N in 0..8 {
                             tmp~N += *xiv.get_unchecked(i * 8 + N) as u128 * op;
                         });
@@ -411,6 +422,7 @@ where
                     let modpj = modps.get_unchecked(j);
                     seq!(N in 0..8 {
                         let pxj = p_coeffs.uget_mut((j, ri+N)).write(modpj.barret_reduction_u128(tmp~N));
+                        // subtract u to correct overflow
                         *pxj = modpj.sub_mod_fast(*pxj, nu~N);
                     });
                 }
@@ -423,6 +435,9 @@ where
         }
     }
 
+    /// Switches basis from Q tp P.
+    ///
+    /// Implementation Equation (6) of https://eprint.iacr.org/2021/204.pdf.
     pub fn switch_crt_basis(
         &self,
         q_poly: &Poly,
@@ -456,16 +471,22 @@ where
 
                 for i in 0..q_size {
                     let mod_ref = modq_ops.get_unchecked(i);
+                    // [(q/q_i)^-1]_q
                     let op = q_hat_inv_modq.get_unchecked(i);
                     let op_shoup = q_hat_inv_modq_shoup.get_unchecked(i);
+                    // 1/q_i
                     let q_invi = q_inv.get_unchecked(i);
                     seq!(N in 0..8{
+                        // [x_i * [(q/q_i)^-1]_q_i]_q_i
                         let tmp~N = mod_ref.mul_mod_shoup(
                             *q_poly.coefficients.uget((i,ri + N)),
                             *op,
                             *op_shoup
                         );
+
+                        // [x_i * [(q/q_i)^-1]_q_i]_q_i * 1/q_i
                         nu~N += tmp~N as f64 * *q_invi;
+
                         uninit.get_unchecked_mut(i*8+N).write(tmp~N);
                     });
                 }
@@ -476,14 +497,16 @@ where
                     // Why not set `tmp` as a vec of u128? Apparently calling `drop_in_place` afterwards on
                     // `tmp` if it were a vec of u128s is more expensive than using tmp as 8 different variables.
                     seq!(N in 0..8{
-                        let mut tmp~N = 0u128;
+                        let mut sum~N = 0u128;
                     });
 
                     for i in 0..q_size {
+                        // (q/q_i)_p_j
                         let op2 = *q_hat_modp.uget((j, i)) as u128;
 
                         seq!(N in 0..8 {
-                            tmp~N += *xiq.get_unchecked(i * 8 + N) as u128 * op2;
+                            // \sum  [x_i * [(q/q_i)^-1]_q_i]_q_i * (q/q_i)_p_j
+                            sum~N += *xiq.get_unchecked(i * 8 + N) as u128 * op2;
 
                         });
                     }
@@ -491,7 +514,9 @@ where
                     let modpj = modp_ops.get_unchecked(j);
 
                     seq!(N in 0..8 {
-                        let tmp = modpj.sub_mod_fast(modpj.barret_reduction_u128(tmp~N), *alpha_modp.uget((j,nu~N as usize)));
+                        // \sum  [x_i * [(q/q_i)^-1]_q_i]_q_i * (q/q_i)_p_j results in `[x]_Q + uQ (mod p_j)`
+                        // To correct we subtracrt uQ from the result where u is \nu.
+                        let tmp = modpj.sub_mod_fast(modpj.barret_reduction_u128(sum~N), *alpha_modp.uget((j,nu~N as usize)));
                         p_coeffs.uget_mut((j, ri + N)).write(tmp);
                     });
                 }
@@ -614,9 +639,12 @@ where
         pq_context.new(pq_coeffs, q_poly.representation.clone())
     }
 
-    /// Switches CRT basis from Q to P approximately.
+    /// Switches CRT basis from Q to P.
     ///
-    /// Note: the result is approximate since overflow is ignored.
+    /// Implements equation (5) of https://eprint.iacr.org/2021/204.pdf.
+    ///
+    /// Basis extension yields [a]_Q + uQ (mod P). Here we ignore `uQ` and do not
+    /// subtract it. Hence, then name `approximate`_switch_crt_basis
     pub fn approx_switch_crt_basis(
         q_coefficients: &ArrayView2<u64>,
         q_moduli_ops: &[Modulus],
@@ -638,23 +666,28 @@ where
 
                 for i in 0..q_size {
                     let modq = q_moduli_ops.get_unchecked(i);
+                    // [(q/q_i)^-1]_q
                     let op = *q_hat_inv_modq.get_unchecked(i);
 
                     seq!(N in 0..8 {
+                        // [x_i * [(q/q_i)^-1]_q]_q
                         tmp.get_unchecked_mut(i*8+N)
                         .write(modq.mul_mod_fast(*q_coefficients.uget((i, ri+N)), op));
                     });
                 }
-                // tmp.set_len(q_size);
 
                 let tmp = mem::transmute::<_, [u64; 3 * 8]>(tmp);
                 for j in 0..p_size {
                     seq!(N in 0..8 {
+                        // summation can be lazy reduced after accumulation because both `op` & `tmp[i]` are < 60 bits
+                        // and `q_size` in practice is less than 25-30.
                         let mut s~N = 0u128;
                     });
 
                     for i in 0..q_size {
+                        // [q/q_i]_p_i
                         let op = *q_hat_modp.uget((j, i)) as u128;
+                        // \sum [x_i * [(q/q_i)^-1]_q]_q [q/q_i]_p_i
                         seq!(N in 0..8 {
                             s~N += *tmp.get_unchecked(i*8+N) as u128 * op;
                         });
@@ -675,11 +708,17 @@ where
         }
     }
 
-    /// Approx mod down
+    /// Approx mod down.
     ///
-    /// Switches modulus from QP to Q and divides the result by P.
-    /// Uses approx mod switch to switch from P to Q resulting in additional uP. However,
-    /// we get rid uP by dividing the final value by P.
+    /// Given $[a]_{PQ}$, to output $[a/P]_Q$ we use algorithm 2 of https://eprint.iacr.org/2018/931.pdf.
+    ///
+    /// Notice that since $[a]_{PQ}$ may not be a multiple of $P$, division in ring $PQ$ is not well defined. Thus, we must find closest representation of a such that it is divisible by $P$. Let $a'$ be closest representation of $a$, then one can write
+    /// $$b = a - a' \cdot P$$
+    /// where $b$ is the remainder when $a$ is divided by $P$. Thus,
+    /// $$b = a \mod{P}$$
+    /// Therefore,
+    /// $$a' = ([a]_Q - [b]_Q) \cdot P^{-1}$$
+    /// To find $[b]_Q$, notice that representation of $a$ equals $b$ in $P$, if $a = {a_{q_0}, a_{q_1}, ...,a_{p_0}, a_{p_1}, ..., a_{p_{j-1}}}$, then $b = a_{p_0}, a_{p_1}, ..., a_{p_{j-1}}$. Therefore, one can find $[b]_Q$ by switching $[b]_P$ to $[b]_Q$.
     pub fn approx_mod_down(
         &self,
         mut qp_poly: Poly,
@@ -690,6 +729,8 @@ where
         p_inv_modq: &[u64],
     ) -> Poly {
         debug_assert!(q_context.moduli_count + p_context.moduli_count == self.moduli_count);
+        // It's ok to assume the input polynomial is in `Evaluation` reprsentation since `approx_mod_down`
+        // is only used in `switch` operation of `HybridKeySwitching` where the input to the function is in `Evaluation`
         debug_assert!(qp_poly.representation == Representation::Evaluation);
 
         let q_size = q_context.moduli_count;
@@ -739,7 +780,9 @@ where
         Poly::new(q_poly, Representation::Evaluation)
     }
 
-    /// Switches polynomial from Q to Q' and scales by 1/qn where Q = q0*q1*q2...*qn and Q' = q0*q1*q2...*q(n-1).
+    /// Switches polynomial from Q to Q' and scales it by 1/qn where Q = q0*q1*q2...*qn and Q' = q0*q1*q2...*q(n-1).
+    ///
+    /// We use algorithm 2 of https://eprint.iacr.org/2018/931.pdf
     ///
     /// Works for both coefficient and evaluation representation, but latter is expensive since you need to pay for
     /// 1 + (n-1) NTT ops.
@@ -748,7 +791,7 @@ where
     /// Even though the row corresponding to last_qi (ie last row) in `poly.coefficients` is rendered useless after
     /// mod_down_next, it still owned by `poly`. This is because we use `slice_collapse` instead of `slice_move` which
     /// only restricts the view to last row instead of removing it. Hence, mod_down_next does not result in lower memory
-    /// size of the poly. This implies that all `clone` operations will result in `poly` of original memory size. This can
+    /// size of the poly. This implies that all `clone` operations will result in `poly` of original memory size. This may
     /// cause unecessary memeory usage if `poly` is cloned without care. Alternatively use `to_owned` instead of `clone`.
     ///
     /// Usage of `slice_collapse` is preferred over `slice_move` because latter would require to transfer ownership of poly,

@@ -25,9 +25,9 @@ For best performance on x86 either use (1) `hexl-ntt` and `hexl` together OR (2)
 
 Note that both `concrete-ntt/nightly` and `hexl-ntt` use AVX512 instruction set to accelerate NTT operations and their performance does not differ.
 
-### Contact
+## Contact
 
-1. Email: janmajayamall@caird.xyz
+1. Email: janmajaya@caird.xyz
 2. Telegram: @janmajayamall
 
 Feel free to reach out for questions/collaboration.

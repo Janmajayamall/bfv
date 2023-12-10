@@ -329,10 +329,11 @@ impl HybridKeySwitchingKey {
         //TODO: check poly is of correct context
         debug_assert!(poly.representation == Representation::Evaluation);
 
-        // We run into problem here that makes using API for `PolynomialContext` as usual not desirable. We need to calculate
+        // We run into problem here that makes using API for `PolynomialContext` not desirable. We need to calculate
         // [c0]_QP = [g]_QP * [poly]_QP + [e]_QP - [c1]_QP * [sk]_QP.
         // To calcualte this we have everything in QP basis except `poly`, which we need to extend from Q to QP.
-        // But extending poly from Q to QP will be wasteful because it is then multiplied with g and [g]_P is 0 (since P|g).
+        // But extending poly from Q to QP will be wasteful because it is then multiplied with g and g vanishes for all modulus p_j (g does not vanish over modulus q_i).
+        //
         // Moreover, this will require having additional pre-computes for switching Q to P. Hence, we prefer the method implemented
         // below. It basically does the same thing but processes Q and P modulus separately.
         let c0s = izip!(c1s.iter(), g)
@@ -342,7 +343,7 @@ impl HybridKeySwitchingKey {
                 qp_ctx.change_representation(&mut e, Representation::Evaluation);
 
                 // Q
-                // g = P * Qj_hat * Qj_hat_inv_modQj
+                // g = P * Q/Qj * [(Q/Qj)^-1]_Qj
                 // [c0]_qi = [g * poly]_qi + [e]_qi - [c1s * sk]_qi
                 izip!(
                     qp_ctx.moduli_ops.0.iter(),
@@ -410,7 +411,7 @@ mod tests {
     use rand::thread_rng;
 
     #[test]
-    fn key_switching_works() {
+    fn bv_key_switching_works() {
         let params = BfvParameters::default(6, 1 << 4);
         let ksk_ctx = params.poly_ctx(&PolyType::Q, 0);
 
@@ -447,12 +448,15 @@ mod tests {
 
     #[test]
     fn hybrid_key_switching() {
-        let params = BfvParameters::default(5, 1 << 6);
+        let mut params = BfvParameters::new(&[50; 10], 65537, 1 << 15);
+        params.enable_hybrid_key_switching(&[50; 2]);
+
         let ksk_ctx = params.poly_ctx(&PolyType::Q, 0);
         let specialp_ctx = params.poly_ctx(&PolyType::SpecialP, 0);
         let qp_ctx = params.poly_ctx(&PolyType::QP, 0);
         let ksk_params =
             HybridKeySwitchingParameters::new(&ksk_ctx, &specialp_ctx, params.alpha.unwrap());
+
         let mut rng = thread_rng();
 
         let sk = SecretKey::random(params.degree, params.hw, &mut rng);

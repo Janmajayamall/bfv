@@ -90,7 +90,7 @@ pub struct BfvParameters<T: Ntt> {
     pub special_moduli_ops: Option<Vec<Modulus>>,
     pub special_moduli_ntt_ops: Option<Vec<T>>,
     pub dnum: Option<usize>,
-    pub alpha: Option<usize>, // fixed to 3
+    pub alpha: Option<usize>,
 
     // Hybrid key switching key parameters
     pub hybrid_ksk_parameters: Option<Vec<HybridKeySwitchingParameters>>,
@@ -596,9 +596,15 @@ where
         self.hw = hw;
     }
 
-    pub fn enable_hybrid_key_switching(&mut self, specialp_bits: &[usize; 3]) {
-        const ALPHA: usize = 3;
-        let dnum = (self.ciphertext_moduli.len() as f64 / ALPHA as f64).ceil() as usize;
+    pub fn enable_hybrid_key_switching(&mut self, specialp_bits: &[usize]) {
+        let alpha = specialp_bits.len();
+        // Figure 1 of https://homomorphicencryption.org/wp-content/uploads/2020/12/wahc20_demo_christian.pdf shows that key switching throughput and key switching size does not increase, decrease respecticely for alpha > 4.
+        assert!(
+            alpha <= 4,
+            "SpecialP modulus for key switching should have <= 4 primes"
+        );
+
+        let dnum = (self.ciphertext_moduli.len() as f64 / alpha as f64).ceil() as usize;
         let special_moduli =
             generate_primes_vec(specialp_bits, self.degree, &self.ciphertext_moduli);
         let special_moduli_ops = special_moduli
@@ -611,7 +617,7 @@ where
             .collect_vec();
 
         self.special_moduli = Some(special_moduli);
-        self.alpha = Some(ALPHA);
+        self.alpha = Some(alpha);
         self.dnum = Some(dnum);
         self.special_moduli_ntt_ops = Some(special_moduli_ntt_ops);
         self.special_moduli_ops = Some(special_moduli_ops);
@@ -622,7 +628,7 @@ where
             .map(|level| {
                 let ksk_ctx = self.poly_ctx(&PolyType::Q, level);
                 let specialp_ctx = self.poly_ctx(&PolyType::SpecialP, level);
-                HybridKeySwitchingParameters::new(&ksk_ctx, &specialp_ctx, ALPHA)
+                HybridKeySwitchingParameters::new(&ksk_ctx, &specialp_ctx, alpha)
             })
             .collect_vec();
 
