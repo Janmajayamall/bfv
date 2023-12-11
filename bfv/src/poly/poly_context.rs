@@ -1086,9 +1086,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{nb_theory::generate_primes_vec, BfvParameters, PolyType};
+    use crate::{BfvParameters, PolyType};
     use num_bigint::{BigInt, ToBigInt};
-    use num_bigint_dig::UniformBigUint;
     use num_traits::{FromPrimitive, Zero};
     use rand::{distributions::Uniform, rngs::ThreadRng, thread_rng, Rng};
     use traits::Ntt;
