@@ -133,24 +133,27 @@ where
 
     /// Changes representation of the polynomial to `to` representation
     pub fn change_representation(&self, poly: &mut Poly, to: Representation) {
-        if poly.representation == Representation::Evaluation {
-            if to == Representation::Coefficient {
-                izip!(poly.coefficients.outer_iter_mut(), self.iter_ntt_ops()).for_each(
-                    |(mut coefficients, ntt)| ntt.backward(coefficients.as_slice_mut().unwrap()),
-                );
-                poly.representation = Representation::Coefficient;
-            } else {
+        match poly.representation {
+            Representation::Evaluation => {
+                if to == Representation::Coefficient {
+                    izip!(poly.coefficients.outer_iter_mut(), self.iter_ntt_ops()).for_each(
+                        |(mut coefficients, ntt)| {
+                            ntt.backward(coefficients.as_slice_mut().unwrap())
+                        },
+                    );
+                    poly.representation = Representation::Coefficient;
+                } else {
+                }
             }
-        } else if poly.representation == Representation::Coefficient {
-            if to == Representation::Evaluation {
-                izip!(poly.coefficients.outer_iter_mut(), self.iter_ntt_ops()).for_each(
-                    |(mut coefficients, ntt)| ntt.forward(coefficients.as_slice_mut().unwrap()),
-                );
-                poly.representation = Representation::Evaluation;
-            } else {
+            Representation::Coefficient => {
+                if to == Representation::Evaluation {
+                    izip!(poly.coefficients.outer_iter_mut(), self.iter_ntt_ops()).for_each(
+                        |(mut coefficients, ntt)| ntt.forward(coefficients.as_slice_mut().unwrap()),
+                    );
+                    poly.representation = Representation::Evaluation;
+                }
             }
-        } else {
-            panic!("Unknown representation");
+            _ => panic!("Unknown representation"),
         }
     }
 

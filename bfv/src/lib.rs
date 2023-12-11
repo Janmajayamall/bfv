@@ -4,6 +4,7 @@ mod evaluator;
 mod galois_key;
 mod key_switching_key;
 mod modulus;
+mod multi_party;
 mod nb_theory;
 mod ntt;
 mod parameters;

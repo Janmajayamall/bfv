@@ -312,7 +312,7 @@ impl HybridKeySwitchingKey {
             .collect_vec()
     }
 
-    fn generate_c0<R: CryptoRng + CryptoRngCore>(
+    pub fn generate_c0<R: CryptoRng + CryptoRngCore>(
         qp_ctx: &PolyContext<'_>,
         c1s: &[Poly],
         g: &[BigUint],
@@ -322,7 +322,7 @@ impl HybridKeySwitchingKey {
         rng: &mut R,
     ) -> Vec<Poly> {
         //TODO: check poly is of correct context
-        debug_assert!(poly.representation == Representation::Evaluation);
+        assert!(poly.representation == Representation::Evaluation);
 
         // We run into problem here that makes using API for `PolynomialContext` not desirable. We need to calculate
         // [c0]_QP = [g]_QP * [poly]_QP + [e]_QP - [c1]_QP * [sk]_QP.

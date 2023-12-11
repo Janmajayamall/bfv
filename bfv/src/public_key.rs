@@ -2,10 +2,10 @@ use crate::{BfvParameters, Ciphertext, Plaintext, Poly, PolyType, Representation
 use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-struct PublicKey {
-    c0: Poly,
-    c1: Poly,
-    seed: [u8; 32],
+pub struct PublicKey {
+    pub(crate) c0: Poly,
+    pub(crate) c1: Poly,
+    pub(crate) seed: [u8; 32],
 }
 
 impl PublicKey {
