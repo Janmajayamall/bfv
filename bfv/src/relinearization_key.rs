@@ -39,6 +39,8 @@ impl RelinearizationKey {
         RelinearizationKey { ksk, level }
     }
 
+    
+
     pub fn relinearize(&self, ct: &Ciphertext, params: &BfvParameters) -> Ciphertext {
         assert!(ct.c.len() == 3); // otherwise invalid relinerization
         assert!(ct.c[0].representation == Representation::Coefficient);

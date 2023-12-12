@@ -211,7 +211,7 @@ where
         t_qhat_inv_modq_divq_frac: &[f64],
         t_bqhat_inv_modq_divq_frac: &[f64],
     ) -> Vec<u64> {
-        debug_assert!(q_poly.representation == Representation::Coefficient);
+        assert!(q_poly.representation == Representation::Coefficient);
 
         let t_f64 = t.modulus().to_f64().unwrap();
         let t_inv = 1.0 / t_f64;
@@ -271,7 +271,7 @@ where
         to_s_hat_inv_mods_divs_frachi: &[u64],
         to_s_hat_inv_mods_divs_fraclo: &[u64],
     ) -> Poly {
-        debug_assert!(pq_poly.representation == Representation::Coefficient);
+        assert!(pq_poly.representation == Representation::Coefficient);
         let mut input_offset = 0;
         let mut output_offset = 0;
         let mut input_size = 0;
@@ -365,7 +365,7 @@ where
         q_inv: &[f64],
         q_inv_modp: &Array2<u64>,
     ) -> Poly {
-        debug_assert!(q_poly.representation == Representation::Coefficient);
+        assert!(q_poly.representation == Representation::Coefficient);
 
         let q_size = self.moduli_count;
         let p_size = p_context.moduli_count;
@@ -451,7 +451,7 @@ where
         q_inv: &[f64],
         alpha_modp: &Array2<u64>,
     ) -> Poly {
-        debug_assert!(q_poly.representation == Representation::Coefficient);
+        assert!(q_poly.representation == Representation::Coefficient);
 
         let q_size = self.moduli_count;
         let p_size = p_context.moduli_count;
@@ -656,8 +656,8 @@ where
         q_hat_modp: &Array2<u64>,
         p_moduli_ops: &[Modulus],
     ) -> Array2<u64> {
-        debug_assert!(q_moduli_ops.len() == q_coefficients.shape()[0]);
-        debug_assert!(q_moduli_ops.len() <= 3);
+        assert!(q_moduli_ops.len() == q_coefficients.shape()[0]);
+        assert!(q_moduli_ops.len() <= 3);
 
         let mut p_coeffs = Array2::<u64>::uninit((p_moduli_ops.len(), degree));
 
@@ -734,7 +734,7 @@ where
         debug_assert!(q_context.moduli_count + p_context.moduli_count == self.moduli_count);
         // It's ok to assume the input polynomial is in `Evaluation` reprsentation since `approx_mod_down`
         // is only used in `switch` operation of `HybridKeySwitching` where the input to the function is in `Evaluation`
-        debug_assert!(qp_poly.representation == Representation::Evaluation);
+        assert!(qp_poly.representation == Representation::Evaluation);
 
         let q_size = q_context.moduli_count;
 
@@ -875,7 +875,7 @@ where
     }
 
     pub fn add_assign(&self, lhs: &mut Poly, rhs: &Poly) {
-        debug_assert!(lhs.representation == rhs.representation);
+        assert!(lhs.representation == rhs.representation);
 
         izip!(
             lhs.coefficients.outer_iter_mut(),
@@ -914,7 +914,7 @@ where
     }
 
     pub fn sub_assign(&self, lhs: &mut Poly, rhs: &Poly) {
-        debug_assert!(lhs.representation == rhs.representation);
+        assert!(lhs.representation == rhs.representation);
         izip!(
             lhs.coefficients.outer_iter_mut(),
             rhs.coefficients.outer_iter(),
@@ -926,7 +926,7 @@ where
     }
 
     pub fn sub(&self, lhs: &Poly, rhs: &Poly) -> Poly {
-        debug_assert!(lhs.representation == rhs.representation);
+        assert!(lhs.representation == rhs.representation);
 
         let mut coeffs = Array2::<u64>::uninit((self.moduli_count, self.degree));
 

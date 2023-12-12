@@ -156,7 +156,8 @@ impl CollectiveRlkGenerator {
         CollectiveRlkGeneratorState(SecretKey::random_with_params(&params, rng))
     }
 
-    // Generates public input vector `a` of size `dnum` values with `crs` as seed.
+    /// Generates public input vector `a` of size `dnum` polynomials with `crs` as seed.
+    /// `crs` is common reference string shared among all parties
     fn generate_public_inputs(params: &BfvParameters, crs: CRS, level: usize) -> Vec<Poly> {
         let ksk_params = params.hybrid_key_switching_params_at_level(level);
         let qp_ctx = params.poly_ctx(&PolyType::QP, level);
@@ -569,10 +570,7 @@ mod tests {
         let ct1 = public_key.encrypt(&params, &pt1, &mut rng);
 
         // multiply ciphertexts
-        let mut rlks = HashMap::new();
-        rlks.insert(0, rlk);
-        let rtgs = HashMap::new();
-        let evaluation_key = EvaluationKey { rlks, rtgs };
+        let evaluation_key = EvaluationKey::new_raw(&[0], vec![rlk], &[], &[], vec![]);
         let evaluator = Evaluator::new(params);
         let ct0c1 = evaluator.mul(&ct0, &ct1);
         let ct_out = evaluator.relinearize(&ct0c1, &evaluation_key);
