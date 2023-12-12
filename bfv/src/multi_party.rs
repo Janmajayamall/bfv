@@ -6,11 +6,9 @@ use itertools::{izip, Itertools};
 use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-struct CRP();
-
 type CRS = [u8; 32];
 
-struct CollectivePublicKeyGenerator {}
+pub struct CollectivePublicKeyGenerator {}
 
 impl CollectivePublicKeyGenerator {
     pub fn generate_share<R: CryptoRng + RngCore>(
@@ -63,7 +61,7 @@ impl CollectivePublicKeyGenerator {
     }
 }
 
-struct CollectiveDecryption();
+pub struct CollectiveDecryption();
 
 impl CollectiveDecryption {
     pub fn generate_share<R: CryptoRng + RngCore>(
@@ -144,9 +142,9 @@ impl CollectiveDecryption {
     }
 }
 
-struct CollectiveRlkGeneratorState(SecretKey);
+pub struct CollectiveRlkGeneratorState(SecretKey);
 
-struct CollectiveRlkGenerator();
+pub struct CollectiveRlkGenerator();
 
 impl CollectiveRlkGenerator {
     pub fn init_state<R: CryptoRng + RngCore>(
@@ -326,14 +324,18 @@ impl CollectiveRlkGenerator {
 
 struct MHE {}
 
-struct Party {
+pub struct PartySecret {
     secret: SecretKey,
 }
 
-struct MHEDebugger {}
+pub struct MHEDebugger {}
 
 impl MHEDebugger {
-    pub unsafe fn measure_noise(parties: &[Party], params: &BfvParameters, ct: &Ciphertext) -> u64 {
+    pub unsafe fn measure_noise(
+        parties: &[PartySecret],
+        params: &BfvParameters,
+        ct: &Ciphertext,
+    ) -> u64 {
         let q_ctx = params.poly_ctx(&PolyType::Q, ct.level());
 
         // Calculate ideal secret key
@@ -400,8 +402,6 @@ impl MHEDebugger {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use itertools::Itertools;
     use rand::thread_rng;
 
@@ -409,13 +409,13 @@ mod tests {
 
     use super::*;
 
-    fn setup_parties(params: &BfvParameters, n: usize) -> Vec<Party> {
+    fn setup_parties(params: &BfvParameters, n: usize) -> Vec<PartySecret> {
         let mut rng = thread_rng();
         (0..n)
             .into_iter()
             .map(|_| {
                 let sk = SecretKey::random_with_params(params, &mut rng);
-                Party { secret: sk }
+                PartySecret { secret: sk }
             })
             .collect_vec()
     }
@@ -427,7 +427,11 @@ mod tests {
         seed
     }
 
-    fn gen_collective_public_key(params: &BfvParameters, parties: &[Party], crs: CRS) -> PublicKey {
+    fn gen_collective_public_key(
+        params: &BfvParameters,
+        parties: &[PartySecret],
+        crs: CRS,
+    ) -> PublicKey {
         let mut rng = thread_rng();
         let shares = parties
             .iter()
@@ -446,7 +450,7 @@ mod tests {
 
     fn collective_decryption(
         params: &BfvParameters,
-        parties: &[Party],
+        parties: &[PartySecret],
         ct: &Ciphertext,
     ) -> Vec<u64> {
         let mut rng = thread_rng();
@@ -492,7 +496,7 @@ mod tests {
     #[test]
     fn collective_rlk_key_generation_works() {
         let no_of_parties = 10;
-        let params = BfvParameters::default(10, 1 << 15);
+        let params = BfvParameters::default(3, 1 << 15);
         let level = 0;
         let parties = setup_parties(&params, no_of_parties);
 

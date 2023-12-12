@@ -46,7 +46,7 @@ impl EvaluationKey {
     /// Create a new evaluation key by manually supplying
     /// (1) relinerization keys with corresponding levels
     /// (2) Galois key with corresponding levels and indices
-    pub(crate) fn new_raw(
+    pub fn new_raw(
         rlk_levels: &[usize],
         rlks: Vec<RelinearizationKey>,
         rtg_levels: &[usize],

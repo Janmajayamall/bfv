@@ -28,6 +28,7 @@ pub use evaluator::*;
 pub use galois_key::*;
 pub use key_switching_key::*;
 pub use modulus::*;
+pub use multi_party::*;
 pub use nb_theory::*;
 pub use ntt::NttOperator;
 pub use parameters::{HybridKeySwitchingParameters, PolyType};
