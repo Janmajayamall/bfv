@@ -1,6 +1,6 @@
 use crate::{
     BfvParameters, Ciphertext, Encoding, HybridKeySwitchingKey, Plaintext, Poly, PolyType,
-    PublicKey, Representation, SecretKey,
+    PublicKey, RelinearizationKey, Representation, SecretKey,
 };
 use itertools::{izip, Itertools};
 use rand::{CryptoRng, RngCore, SeedableRng};
@@ -149,6 +149,13 @@ struct CollectiveRlkGeneratorState(SecretKey);
 struct CollectiveRlkGenerator();
 
 impl CollectiveRlkGenerator {
+    pub fn init_state<R: CryptoRng + RngCore>(
+        params: &BfvParameters,
+        rng: &mut R,
+    ) -> CollectiveRlkGeneratorState {
+        CollectiveRlkGeneratorState(SecretKey::random_with_params(&params, rng))
+    }
+
     // Generates public input vector `a` of size `dnum` values with `crs` as seed.
     fn generate_public_inputs(params: &BfvParameters, crs: CRS, level: usize) -> Vec<Poly> {
         let ksk_params = params.hybrid_key_switching_params_at_level(level);
@@ -164,17 +171,18 @@ impl CollectiveRlkGenerator {
     pub fn generate_share_1<R: CryptoRng + RngCore>(
         params: &BfvParameters,
         sk: &SecretKey,
+        state: &CollectiveRlkGeneratorState,
         crs: CRS,
         level: usize,
         rng: &mut R,
-    ) -> (Vec<Poly>, Vec<Poly>, CollectiveRlkGeneratorState) {
+    ) -> (Vec<Poly>, Vec<Poly>) {
         let a_values = CollectiveRlkGenerator::generate_public_inputs(params, crs, level);
 
         let ksk_params = params.hybrid_key_switching_params_at_level(level);
         let qp_ctx = params.poly_ctx(&PolyType::QP, level);
 
         // ephemeral secret
-        let u_i = SecretKey::random_with_params(&params, rng);
+        let u_i = &state.0;
 
         // `HybridKeySwitchingKey::generate_c0` expects `poly` to be multiplied with in key switching to have context of ciphertext polynomial at level
         let q_ctx = params.poly_ctx(&PolyType::Q, level);
@@ -182,18 +190,18 @@ impl CollectiveRlkGenerator {
             q_ctx.try_convert_from_i64_small(&sk.coefficients, Representation::Coefficient);
         q_ctx.change_representation(&mut s_i_poly, Representation::Evaluation);
 
-        // h_{0,i}
+        // [h_{0,i}]
         let h0s = HybridKeySwitchingKey::generate_c0(
             &qp_ctx,
             &a_values,
             &ksk_params.g,
             &s_i_poly,
-            &u_i,
+            u_i,
             params.variance,
             rng,
         );
 
-        // h_{1,i}
+        // [h_{1,i}]
         // [s_i]_QP (TODO: Since QP is union of Q and P, we are unecessarily reducing s_i coefficients by prime q_0, ... q_{l-1} twice)
         let mut s_i_poly =
             qp_ctx.try_convert_from_i64_small(&sk.coefficients, Representation::Coefficient);
@@ -211,50 +219,108 @@ impl CollectiveRlkGenerator {
             })
             .collect_vec();
 
-        (h0s, h1s, CollectiveRlkGeneratorState(u_i))
+        (h0s, h1s)
     }
 
-    pub fn aggregate_share_1() {
-        todo!()
+    pub fn aggregate_shares_1(
+        params: &BfvParameters,
+        h0s: &[Vec<Poly>],
+        h1s: &[Vec<Poly>],
+        level: usize,
+    ) -> (Vec<Poly>, Vec<Poly>) {
+        let qp_ctx = params.poly_ctx(&PolyType::QP, level);
+
+        let mut h0_agg = h0s[0].to_owned();
+        h0s.iter().skip(1).for_each(|shares_i| {
+            izip!(h0_agg.iter_mut(), shares_i.iter()).for_each(|(s0, s1)| {
+                qp_ctx.add_assign(s0, s1);
+            });
+        });
+
+        let mut h1_agg = h1s[0].to_owned();
+        h1s.iter().skip(1).for_each(|shares_i| {
+            izip!(h1_agg.iter_mut(), shares_i.iter()).for_each(|(s0, s1)| {
+                qp_ctx.add_assign(s0, s1);
+            });
+        });
+
+        (h0_agg, h1_agg)
     }
 
     pub fn generate_share_2<R: CryptoRng + RngCore>(
         params: &BfvParameters,
         sk: &SecretKey,
-        h0_agg: &Poly,
-        h1_agg: &Poly,
+        h0_agg: &[Poly],
+        h1_agg: &[Poly],
         state: &CollectiveRlkGeneratorState,
         level: usize,
         rng: &mut R,
-    ) -> (Poly, Poly) {
+    ) -> (Vec<Poly>, Vec<Poly>) {
         let qp_ctx = params.poly_ctx(&PolyType::QP, level);
 
         let mut s_i =
             qp_ctx.try_convert_from_i64_small(&sk.coefficients, Representation::Coefficient);
         qp_ctx.change_representation(&mut s_i, Representation::Evaluation);
 
-        // h1'_i = (u_i - s_i) * \sum h1_i + e_2
         let mut u_i =
             qp_ctx.try_convert_from_i64_small(&state.0.coefficients, Representation::Coefficient);
         qp_ctx.change_representation(&mut u_i, Representation::Evaluation);
-        qp_ctx.sub_assign(&mut u_i, &s_i);
-        let mut h1_dash_i = u_i;
-        qp_ctx.mul_assign(&mut h1_dash_i, &h1_agg);
-        let mut e_2 = qp_ctx.random_gaussian(Representation::Coefficient, params.variance, rng);
-        qp_ctx.change_representation(&mut e_2, Representation::Evaluation);
-        qp_ctx.add_assign(&mut h1_dash_i, &e_2);
 
-        // h0'_i = s_i * \sum h0_i + e_1
-        qp_ctx.mul_assign(&mut s_i, h0_agg);
-        let mut h0_dash_i = s_i;
-        let mut e_1 = qp_ctx.random_gaussian(Representation::Coefficient, params.variance, rng);
-        qp_ctx.change_representation(&mut e_1, Representation::Evaluation);
-        qp_ctx.add_assign(&mut h0_dash_i, &e_1);
+        let (h0_dash, h1_dash): (Vec<Poly>, Vec<Poly>) = izip!(h0_agg.iter(), h1_agg.iter())
+            .map(|(h0, h1)| {
+                // h1'_i = (u_i - s_i) * \sum h1_i + e_2
+                let mut h1_dash_i = qp_ctx.sub(&u_i, &s_i);
+                qp_ctx.mul_assign(&mut h1_dash_i, &h1);
+                let mut e_2 =
+                    qp_ctx.random_gaussian(Representation::Coefficient, params.variance, rng);
+                qp_ctx.change_representation(&mut e_2, Representation::Evaluation);
+                qp_ctx.add_assign(&mut h1_dash_i, &e_2);
 
-        (h0_dash_i, h1_dash_i)
+                // h0'_i = s_i * \sum h0_i + e_1
+                let mut h0_dash_i = qp_ctx.mul(&s_i, h0);
+                let mut e_1 =
+                    qp_ctx.random_gaussian(Representation::Coefficient, params.variance, rng);
+                qp_ctx.change_representation(&mut e_1, Representation::Evaluation);
+                qp_ctx.add_assign(&mut h0_dash_i, &e_1);
+
+                (h0_dash_i, h1_dash_i)
+            })
+            .unzip();
+
+        (h0_dash, h1_dash)
     }
 
-    pub fn aggrgegate_share_2_and_finalise() {}
+    pub fn aggregate_shares_2(
+        params: &BfvParameters,
+        h0_dash_shares: &[Vec<Poly>],
+        h1_dash_shares: &[Vec<Poly>],
+        h1_agg: Vec<Poly>,
+        level: usize,
+    ) -> RelinearizationKey {
+        let qp_ctx = params.poly_ctx(&PolyType::QP, level);
+
+        // h0'+h1'
+        let mut h0_dash_h1_dash_agg = h0_dash_shares[0].to_owned();
+        h0_dash_shares.iter().skip(1).for_each(|shares_i| {
+            izip!(h0_dash_h1_dash_agg.iter_mut(), shares_i.iter()).for_each(|(s0, s1)| {
+                qp_ctx.add_assign(s0, s1);
+            });
+        });
+        h1_dash_shares.iter().for_each(|shares_i| {
+            izip!(h0_dash_h1_dash_agg.iter_mut(), shares_i.iter()).for_each(|(s0, s1)| {
+                qp_ctx.add_assign(s0, s1);
+            });
+        });
+
+        RelinearizationKey {
+            ksk: HybridKeySwitchingKey {
+                seed: None,
+                c0s: h0_dash_h1_dash_agg.into_boxed_slice(),
+                c1s: h1_agg.into_boxed_slice(),
+            },
+            level,
+        }
+    }
 }
 
 struct MHE {}
@@ -333,10 +399,12 @@ impl MHEDebugger {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use itertools::Itertools;
     use rand::thread_rng;
 
-    use crate::Encoding;
+    use crate::{public_key, Encoding, EvaluationKey, Evaluator};
 
     use super::*;
 
@@ -358,15 +426,7 @@ mod tests {
         seed
     }
 
-    #[test]
-    fn multi_party_encryption_decryption_works() {
-        let no_of_parties = 10;
-        let params = BfvParameters::default(10, 1 << 6);
-
-        let parties = setup_parties(&params, no_of_parties);
-
-        // Generate collective public key
-        let crs = gen_crs();
+    fn gen_collective_public_key(params: &BfvParameters, parties: &[Party], crs: CRS) -> PublicKey {
         let mut rng = thread_rng();
         let shares = parties
             .iter()
@@ -380,10 +440,39 @@ mod tests {
             })
             .collect_vec();
 
-        let public_key =
-            CollectivePublicKeyGenerator::aggregate_shares_and_finalise(&params, &shares, crs);
+        CollectivePublicKeyGenerator::aggregate_shares_and_finalise(&params, &shares, crs)
+    }
+
+    fn collective_decryption(
+        params: &BfvParameters,
+        parties: &[Party],
+        ct: &Ciphertext,
+    ) -> Vec<u64> {
+        let mut rng = thread_rng();
+        let shares = parties
+            .iter()
+            .map(|party_i| {
+                CollectiveDecryption::generate_share(&params, &ct, &party_i.secret, &mut rng)
+            })
+            .collect_vec();
+
+        CollectiveDecryption::aggregate_share_and_decrypt(&params, &ct, &shares)
+            .decode(Encoding::default(), &params)
+    }
+
+    #[test]
+    fn multi_party_encryption_decryption_works() {
+        let no_of_parties = 10;
+        let params = BfvParameters::default(10, 1 << 6);
+
+        let parties = setup_parties(&params, no_of_parties);
+
+        // Generate collective public key
+        let crs = gen_crs();
+        let public_key = gen_collective_public_key(&params, &parties, crs);
 
         // Encrypt message
+        let mut rng = thread_rng();
         let m = params
             .plaintext_modulus_op
             .random_vec(params.degree, &mut rng);
@@ -395,15 +484,130 @@ mod tests {
         }
 
         // Distributed decryption
-        let shares = parties
-            .iter()
-            .map(|party_i| {
-                CollectiveDecryption::generate_share(&params, &ct, &party_i.secret, &mut rng)
-            })
-            .collect_vec();
-        let m_back: Vec<u64> =
-            CollectiveDecryption::aggregate_share_and_decrypt(&params, &ct, &shares)
-                .decode(Encoding::default(), &params);
+        let m_back = collective_decryption(&params, &parties, &ct);
         assert_eq!(m, m_back);
+    }
+
+    #[test]
+    fn collective_rlk_key_generation_works() {
+        let no_of_parties = 10;
+        let params = BfvParameters::default(10, 1 << 15);
+        let level = 0;
+        let parties = setup_parties(&params, no_of_parties);
+
+        // Generate RLK //
+
+        // initialise state
+        let mut rng = thread_rng();
+        let collective_rlk_state = parties
+            .iter()
+            .map(|party_i| CollectiveRlkGenerator::init_state(&params, &mut rng))
+            .collect_vec();
+
+        // Generate and collect h0s and h1s
+        let crs = gen_crs();
+        let mut h0s = vec![];
+        let mut h1s = vec![];
+        izip!(parties.iter(), collective_rlk_state.iter()).for_each(|(party_i, state_i)| {
+            let (h0_i, h1_i) = CollectiveRlkGenerator::generate_share_1(
+                &params,
+                &party_i.secret,
+                state_i,
+                crs,
+                level,
+                &mut rng,
+            );
+            h0s.push(h0_i);
+            h1s.push(h1_i);
+        });
+
+        // aggregate h0s and h1s
+        let (h0s_agg, h1s_agg) = CollectiveRlkGenerator::aggregate_shares_1(
+            &params,
+            h0s.as_slice(),
+            h1s.as_slice(),
+            level,
+        );
+
+        // Generate and collect h'0s h'1s
+        let mut h_dash_0s = vec![];
+        let mut h_dash_1s = vec![];
+        izip!(parties.iter(), collective_rlk_state.iter()).for_each(|(party_i, state_i)| {
+            let (h_dash_0_i, h_dash_1_i) = CollectiveRlkGenerator::generate_share_2(
+                &params,
+                &party_i.secret,
+                &h0s_agg,
+                &h1s_agg,
+                state_i,
+                level,
+                &mut rng,
+            );
+            h_dash_0s.push(h_dash_0_i);
+            h_dash_1s.push(h_dash_1_i);
+        });
+
+        // aggregate h'0s and h'1s
+        let rlk = CollectiveRlkGenerator::aggregate_shares_2(
+            &params, &h_dash_0s, &h_dash_1s, h1s_agg, level,
+        );
+
+        // Generate public key //
+        let crs = gen_crs();
+        let public_key = gen_collective_public_key(&params, &parties, crs);
+
+        // Encryt two plaintexts
+        let mut rng = thread_rng();
+        let m0 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+        let m1 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+        let pt0 = Plaintext::encode(&m0, &params, Encoding::default());
+        let pt1 = Plaintext::encode(&m1, &params, Encoding::default());
+        let ct0 = public_key.encrypt(&params, &pt0, &mut rng);
+        let ct1 = public_key.encrypt(&params, &pt1, &mut rng);
+
+        // multiply ciphertexts
+        let mut rlks = HashMap::new();
+        rlks.insert(0, rlk);
+        let rtgs = HashMap::new();
+        let evaluation_key = EvaluationKey { rlks, rtgs };
+        let evaluator = Evaluator::new(params);
+        let ct0c1 = evaluator.mul(&ct0, &ct1);
+        let ct_out = evaluator.relinearize(&ct0c1, &evaluation_key);
+
+        unsafe {
+            dbg!(MHEDebugger::measure_noise(
+                &parties,
+                evaluator.params(),
+                &ct0c1
+            ));
+            dbg!(MHEDebugger::measure_noise(
+                &parties,
+                evaluator.params(),
+                &ct_out
+            ));
+            dbg!(MHEDebugger::measure_noise(
+                &parties,
+                evaluator.params(),
+                &ct0
+            ));
+            dbg!(MHEDebugger::measure_noise(
+                &parties,
+                evaluator.params(),
+                &ct1
+            ));
+        }
+
+        // decrypt ct_out
+        let m0m1 = collective_decryption(evaluator.params(), &parties, &ct_out);
+        let mut m0m1_expected = m0;
+        evaluator
+            .params()
+            .plaintext_modulus_op
+            .mul_mod_fast_vec(&mut m0m1_expected, &m1);
+
+        assert_eq!(m0m1, m0m1_expected);
     }
 }

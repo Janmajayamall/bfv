@@ -13,9 +13,9 @@ use rand_chacha::ChaCha8Rng;
 use std::default;
 use traits::Ntt;
 struct BVKeySwitchingKey {
-    c0s: Box<[Poly]>,
-    c1s: Box<[Poly]>,
-    seed: <ChaCha8Rng as SeedableRng>::Seed,
+    pub(crate) c0s: Box<[Poly]>,
+    pub(crate) c1s: Box<[Poly]>,
+    pub(crate) seed: <ChaCha8Rng as SeedableRng>::Seed,
 }
 
 impl BVKeySwitchingKey {
