@@ -26,6 +26,15 @@ Collective relinearization key generation is the only 2 round protocol.
 7. Parties broadcast their generated $share_2$s.
 8. Each party aggregates received $share_2$s by calling `CollectiveRlkGenerator::aggregate_shares_2`. `CollectiveRlkGenerator::aggregate_shares_2` also finalises the protocol by constructing the relinearization key.
 
+**Collective galois key generation**
+
+Galois keys are required to rotate the ciphertext left/right and to swap the rows. Collective galois key generation is a single round protocol. 
+
+1. Each party initialises their state by calling `CollectiveGaloisKey::init_state`.
+2. Each part generates their $share_1$ by calling `CollectiveGaloisKey::generate_share_1`.
+3. Parties broadcast their shares. 
+4. After receiving $share_1$s from all parties, party calls `CollectiveGaloisKey::aggregate_shares_1_and_finalise` to aggregate the shares and output the galois key.
+
 **Collective decryption**
 
 Given ciphertext $ct$ encrypted using collective public key, collective decryption is a single round protocol that decrypts $ct$.

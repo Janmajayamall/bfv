@@ -12,7 +12,7 @@ pub enum Representation {
     Unknown,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Substitution {
     pub(crate) exponent: usize,
     pub(crate) power_bitrev: Box<[usize]>,

@@ -1,6 +1,6 @@
 use crate::{
-    BfvParameters, Ciphertext, Encoding, HybridKeySwitchingKey, Plaintext, Poly, PolyType,
-    PublicKey, RelinearizationKey, Representation, SecretKey,
+    BfvParameters, Ciphertext, Encoding, GaloisKey, HybridKeySwitchingKey, Plaintext, Poly,
+    PolyType, PublicKey, RelinearizationKey, Representation, SecretKey, Substitution,
 };
 use itertools::{izip, Itertools};
 use rand::{CryptoRng, RngCore, SeedableRng};
@@ -60,7 +60,6 @@ impl CollectivePublicKeyGenerator {
         }
     }
 }
-
 pub struct CollectiveDecryption();
 
 impl CollectiveDecryption {
@@ -322,6 +321,94 @@ impl CollectiveRlkGenerator {
     }
 }
 
+#[derive(Clone)]
+pub struct CollectiveGaloisKeyGeneratorState {
+    c1s: Vec<Poly>,
+    substitution: Substitution,
+    crs: CRS,
+}
+
+pub struct CollectiveGaloisKeyGenerator();
+impl CollectiveGaloisKeyGenerator {
+    pub fn init_state(
+        params: &BfvParameters,
+        exponent: usize,
+        crs: CRS,
+        level: usize,
+    ) -> CollectiveGaloisKeyGeneratorState {
+        let ksk_params = params.hybrid_key_switching_params_at_level(level);
+        let qp_ctx = params.poly_ctx(&PolyType::QP, level);
+
+        let c1s = HybridKeySwitchingKey::generate_c1(ksk_params.dnum, &qp_ctx, crs);
+
+        // substitution map
+        let substitution = Substitution::new(exponent, params.degree);
+
+        CollectiveGaloisKeyGeneratorState {
+            c1s,
+            substitution,
+            crs,
+        }
+    }
+
+    pub fn generate_share_1<R: CryptoRng + RngCore>(
+        params: &BfvParameters,
+        sk: &SecretKey,
+        state: &CollectiveGaloisKeyGeneratorState,
+        level: usize,
+        rng: &mut R,
+    ) -> Vec<Poly> {
+        let ksk_params = params.hybrid_key_switching_params_at_level(level);
+        let qp_ctx = params.poly_ctx(&PolyType::QP, level);
+
+        // Substitute secret key
+        let q_ctx = params.poly_ctx(&PolyType::Q, level);
+        let mut sk_poly =
+            q_ctx.try_convert_from_i64_small(&sk.coefficients, Representation::Coefficient);
+        q_ctx.change_representation(&mut sk_poly, Representation::Evaluation);
+        let sk_poly = q_ctx.substitute(&sk_poly, &state.substitution);
+
+        let c0s = HybridKeySwitchingKey::generate_c0(
+            &qp_ctx,
+            &state.c1s,
+            &ksk_params.g,
+            &sk_poly,
+            sk,
+            params.variance,
+            rng,
+        );
+
+        c0s
+    }
+
+    pub fn aggregate_shares_1_and_finalise(
+        params: &BfvParameters,
+        share1_c0s: &[Vec<Poly>],
+        state: CollectiveGaloisKeyGeneratorState,
+        level: usize,
+    ) -> GaloisKey {
+        let qp_ctx = params.poly_ctx(&PolyType::QP, level);
+        let mut c0s_agg = share1_c0s[0].clone();
+        share1_c0s.iter().skip(1).for_each(|share_i_c0s| {
+            izip!(c0s_agg.iter_mut(), share_i_c0s.iter()).for_each(|(c0_sum, c0)| {
+                qp_ctx.add_assign(c0_sum, c0);
+            })
+        });
+
+        let ksk_key = HybridKeySwitchingKey {
+            seed: Some(state.crs),
+            c0s: c0s_agg.into_boxed_slice(),
+            c1s: state.c1s.into_boxed_slice(),
+        };
+
+        GaloisKey {
+            substitution: state.substitution,
+            ksk_key,
+            level,
+        }
+    }
+}
+
 struct MHE {}
 
 pub struct PartySecret {
@@ -405,7 +492,7 @@ mod tests {
     use itertools::Itertools;
     use rand::thread_rng;
 
-    use crate::{public_key, Encoding, EvaluationKey, Evaluator};
+    use crate::{rot_to_galois_element, Encoding, EvaluationKey, Evaluator};
 
     use super::*;
 
@@ -611,5 +698,89 @@ mod tests {
             .mul_mod_fast_vec(&mut m0m1_expected, &m1);
 
         assert_eq!(m0m1, m0m1_expected);
+    }
+
+    #[test]
+    fn collective_galois_key_rotation_works() {
+        let no_of_parties = 10;
+        let params = BfvParameters::default(6, 1 << 15);
+        let level = 0;
+        let parties = setup_parties(&params, no_of_parties);
+
+        // Generate Galois key //
+
+        // Rotate left by 1
+        let exponent = rot_to_galois_element(1, params.degree);
+
+        let crs = gen_crs();
+
+        // initialise state
+        let mut rng = thread_rng();
+        let collective_galois_state = parties
+            .iter()
+            .map(|party_i| CollectiveGaloisKeyGenerator::init_state(&params, exponent, crs, level))
+            .collect_vec();
+
+        // Generate and collect h0s and h1s
+        let share1_c0s = izip!(parties.iter(), collective_galois_state.iter())
+            .map(|(party_i, state_i)| {
+                CollectiveGaloisKeyGenerator::generate_share_1(
+                    &params,
+                    &party_i.secret,
+                    state_i,
+                    level,
+                    &mut rng,
+                )
+            })
+            .collect_vec();
+
+        // aggregate share1_c0s and finalise
+        let state = collective_galois_state[0].clone();
+        let galois_key = CollectiveGaloisKeyGenerator::aggregate_shares_1_and_finalise(
+            &params,
+            &share1_c0s,
+            state,
+            level,
+        );
+
+        // Generate public key //
+        let crs = gen_crs();
+        let public_key = gen_collective_public_key(&params, &parties, crs);
+
+        // Encryt a message
+        let mut rng = thread_rng();
+        let mut m0 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+        let pt0 = Plaintext::encode(&m0, &params, Encoding::default());
+        let ct0 = public_key.encrypt(&params, &pt0, &mut rng);
+
+        // multiply ciphertexts
+        let evaluation_key = EvaluationKey::new_raw(&[], vec![], &[level], &[1], vec![galois_key]);
+        let evaluator = Evaluator::new(params);
+        let ct0_rotated = evaluator.rotate(&ct0, 1, &evaluation_key);
+
+        unsafe {
+            dbg!(MHEDebugger::measure_noise(
+                &parties,
+                evaluator.params(),
+                &ct0_rotated
+            ));
+            dbg!(MHEDebugger::measure_noise(
+                &parties,
+                evaluator.params(),
+                &ct0
+            ));
+        }
+
+        // decrypt ct_out
+        let m0_rotated = collective_decryption(evaluator.params(), &parties, &ct0_rotated);
+
+        let len = m0.len();
+        let (m0_first, m0_last) = m0.split_at_mut(len / 2);
+        m0_first.rotate_left(1);
+        m0_last.rotate_left(1);
+
+        assert_eq!(m0, m0_rotated);
     }
 }
