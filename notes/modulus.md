@@ -11,7 +11,7 @@ Algorithm 2 of https://homes.esat.kuleuven.be/~fvercaut/papers/bar_mont.pdf spec
 
 1. $m$ is the modulus. $n = \log_2m$.
 2. To reduce $x$ where $\log_2x <= n + \gamma$ by modulus $m$ with $n$ bits, where $\gamma < n$, we implement Algorithm 2 of https://homes.esat.kuleuven.be/~fvercaut/papers/bar_mont.pdf.
-3. $ \alpha = n + 3 $ and $ \beta = -2 $. Generally $\alpha \ge  \gamma + 1$ where $\gamma + n \ge log_{2} x$ and $x$ is dividend in $\lfloor \frac{x}{m} \rfloor$.
+3. $\alpha = n + 3$ and $\beta = -2$. Generally $\alpha \ge  \gamma + 1$ where $\gamma + n \ge log_{2} x$ and $x$ is dividend in $\lfloor \frac{x}{m} \rfloor$.
 4. $\mu = \frac{2^{\alpha + n}}{m} = \frac{2^{2n + 3}}{m} $
 5. $\mu$ is stored in 64 bits. Since $\log_2mu = (2n+3) - n = n+3$, $\mu$ will only fit in 64 bits if $n < 61$. Hence, implementation will given incorrect result for $n \ge 61$.
 6. $\alpha = n+3$ and $\beta = -2$ play an important role in estimation of $q = \lfloor \frac {x}{m} \rfloor$. I have observed with set $\alpha$ and $\b$eta$ values that as long as $log_2x < 2n$ estimation of $q$ is accurate such that you do not pay for correction cost.
