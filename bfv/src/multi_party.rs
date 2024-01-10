@@ -409,17 +409,11 @@ impl CollectiveGaloisKeyGenerator {
     }
 }
 
-struct MHE {}
-
-pub struct PartySecret {
-    secret: SecretKey,
-}
-
 pub struct MHEDebugger {}
 
 impl MHEDebugger {
     pub unsafe fn measure_noise(
-        parties: &[PartySecret],
+        parties: &[SecretKey],
         params: &BfvParameters,
         ct: &Ciphertext,
     ) -> u64 {
@@ -429,10 +423,8 @@ impl MHEDebugger {
         // s_{ideal} = \sum s_i
         let mut s_ideal = q_ctx.zero(Representation::Evaluation);
         parties.iter().for_each(|party_i| {
-            let mut sk = q_ctx.try_convert_from_i64_small(
-                &party_i.secret.coefficients,
-                Representation::Coefficient,
-            );
+            let mut sk = q_ctx
+                .try_convert_from_i64_small(&party_i.coefficients, Representation::Coefficient);
             q_ctx.change_representation(&mut sk, Representation::Evaluation);
             q_ctx.add_assign(&mut s_ideal, &sk);
         });
@@ -495,6 +487,10 @@ mod tests {
     use crate::{rot_to_galois_element, Encoding, EvaluationKey, Evaluator};
 
     use super::*;
+
+    pub struct PartySecret {
+        secret: SecretKey,
+    }
 
     fn setup_parties(params: &BfvParameters, n: usize) -> Vec<PartySecret> {
         let mut rng = thread_rng();
@@ -572,7 +568,8 @@ mod tests {
         let ct = public_key.encrypt(&params, &pt, &mut rng);
 
         unsafe {
-            dbg!(MHEDebugger::measure_noise(&parties, &params, &ct));
+            let secrets = parties.iter().map(|s| s.secret.clone()).collect_vec();
+            dbg!(MHEDebugger::measure_noise(&secrets, &params, &ct));
         }
 
         // Distributed decryption
@@ -667,23 +664,24 @@ mod tests {
         let ct_out = evaluator.relinearize(&ct0c1, &evaluation_key);
 
         unsafe {
+            let secrets = parties.iter().map(|s| s.secret.clone()).collect_vec();
             dbg!(MHEDebugger::measure_noise(
-                &parties,
+                &secrets,
                 evaluator.params(),
                 &ct0c1
             ));
             dbg!(MHEDebugger::measure_noise(
-                &parties,
+                &secrets,
                 evaluator.params(),
                 &ct_out
             ));
             dbg!(MHEDebugger::measure_noise(
-                &parties,
+                &secrets,
                 evaluator.params(),
                 &ct0
             ));
             dbg!(MHEDebugger::measure_noise(
-                &parties,
+                &secrets,
                 evaluator.params(),
                 &ct1
             ));
@@ -761,13 +759,15 @@ mod tests {
         let ct0_rotated = evaluator.rotate(&ct0, 1, &evaluation_key);
 
         unsafe {
+            let secrets = parties.iter().map(|s| s.secret.clone()).collect_vec();
+
             dbg!(MHEDebugger::measure_noise(
-                &parties,
+                &secrets,
                 evaluator.params(),
                 &ct0_rotated
             ));
             dbg!(MHEDebugger::measure_noise(
-                &parties,
+                &secrets,
                 evaluator.params(),
                 &ct0
             ));
