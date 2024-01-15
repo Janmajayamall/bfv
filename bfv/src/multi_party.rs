@@ -141,7 +141,7 @@ impl CollectiveDecryption {
     }
 }
 
-pub struct CollectiveRlkGeneratorState(SecretKey);
+pub struct CollectiveRlkGeneratorState(pub SecretKey);
 
 pub struct CollectiveRlkGenerator();
 
