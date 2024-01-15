@@ -300,6 +300,7 @@ where
                     let fhi = *to_s_hat_inv_mods_divs_frachi.get_unchecked(i) as u128;
                     let flo = *to_s_hat_inv_mods_divs_fraclo.get_unchecked(i) as u128;
 
+                    #[cfg(not(target_arch = "wasm32"))]
                     seq!(N in 0..8 {
                         let xi = *pq_poly.coefficients.uget((i + input_offset, ri+N));
                         let lo = xi as u128 * flo;
@@ -308,6 +309,21 @@ where
                             lo as u64,
                             hi as u64,
                             (hi >> 64) as u64,
+                        ]));
+                    });
+
+                    #[cfg(target_arch = "wasm32")]
+                    seq!(N in 0..8 {
+                        let xi = *pq_poly.coefficients.uget((i + input_offset, ri + N));
+                        let lo = xi as u128 * flo;
+                        let hi = xi as u128 * fhi + (lo >> 64);
+                        frac~N = frac~N.wrapping_add(&U192::from_words([
+                            lo as u32,
+                            (lo >> 32) as u32,
+                            hi as u32,
+                            (hi >> 32) as u32,
+                            (hi >> 64) as u32,
+                            (hi >> 96) as u32,
                         ]));
                     });
                 }

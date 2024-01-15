@@ -19,10 +19,15 @@ seq-macro = "0.3"
 hexl-rs = {git = "https://github.com/Janmajayamall/hexl-rs.git", optional = true}
 prost = {version = "0.11", optional = true}
 concrete-ntt = {version= "0.1.0", default-features = false}
+getrandom = {version = "0.2.12", features = ["js"]}
 traits = {path = "./../traits"}
 
+[target.'cfg(target_arc = "wasm32")'.dependencies]
+getrandom = {version = "0.2.12", features = ["js"]}
+
 [dev-dependencies]
-criterion = "0.4"
+criterion = {version = "0.4", default-features = false}
+
 
 [build-dependencies]
 prost-build = {version = "0.11.9", optional = true}
