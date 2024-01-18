@@ -1,19 +1,22 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, default};
 
 use crate::{
     convert_bytes_to_ternary, convert_from_bytes, convert_ternary_to_bytes, convert_to_bytes,
-    BfvParameters, Ciphertext, EvaluationKey, GaloisKey, HybridKeySwitchingKey, Poly, PolyContext,
-    PolyType, RelinearizationKey, Representation, SecretKey, Substitution,
+    BfvParameters, Ciphertext, CollectiveDecryption, CollectiveDecryptionShare,
+    CollectivePublicKeyShare, CollectiveRlkAggShare1, CollectiveRlkAggTrimmedShare1,
+    CollectiveRlkShare1, CollectiveRlkShare2, EvaluationKey, GaloisKey, HybridKeySwitchingKey,
+    Poly, PolyContext, PolyType, PublicKey, RelinearizationKey, Representation, SecretKey,
+    Substitution,
 };
 use itertools::{izip, Itertools};
 use ndarray::Array2;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use traits::{TryFromWithParameters, TryFromWithPolyContext};
+use traits::{TryFromWithLevelledParameters, TryFromWithParameters, TryFromWithPolyContext};
 
 // include protos
 pub mod proto {
-    include!(concat!(env!("OUT_DIR"), "/_.rs"));
+    include!(concat!(env!("OUT_DIR"), "/my.bfv.rs"));
 }
 
 // Poly //
@@ -96,7 +99,7 @@ impl TryFromWithParameters for proto::Ciphertext {
             } else {
                 // if seed is present, then the ciphertext can be assumed to be fresh ciphertext with
                 // polynomial degree of <= 2 where the second polynomial is seeded. Thus we only need to
-                // serialise the first polynomial
+                // serialize the first polynomial
                 assert!(value.c.len() <= 2);
                 1
             }
@@ -368,11 +371,256 @@ impl TryFromWithParameters for EvaluationKey {
     }
 }
 
+// Public Key //
+impl TryFromWithParameters for proto::PublicKey {
+    type Parameters = BfvParameters;
+    type Value = PublicKey;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        let qr_ctx = parameters.poly_ctx(&PolyType::Qr, 0);
+
+        let mut c0 = value.c0.clone();
+        qr_ctx.change_representation(&mut c0, Representation::Coefficient);
+        let c0_seriliazed = proto::Poly::try_from_with_context(&c0, &qr_ctx);
+
+        proto::PublicKey {
+            c0: Some(c0_seriliazed),
+            seed: value.seed.to_vec(),
+        }
+    }
+}
+
+impl TryFromWithParameters for PublicKey {
+    type Parameters = BfvParameters;
+    type Value = proto::PublicKey;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        let qr_ctx = parameters.poly_ctx(&PolyType::Qr, 0);
+
+        let mut c0 = Poly::try_from_with_context(value.c0.as_ref().unwrap(), &qr_ctx);
+        qr_ctx.change_representation(&mut c0, Representation::Evaluation);
+
+        let mut seed = <ChaCha8Rng as SeedableRng>::Seed::default();
+        seed.copy_from_slice(&value.seed);
+
+        let mut prng = ChaCha8Rng::from_seed(seed);
+        let mut c1 = qr_ctx.random(Representation::Evaluation, &mut prng);
+        qr_ctx.neg_assign(&mut c1);
+
+        PublicKey { c0, c1, seed }
+    }
+}
+
+// Multi party //
+
+// CollectivePublicKeyShare //
+impl TryFromWithParameters for proto::CollectivePublicKeyShare {
+    type Parameters = BfvParameters;
+    type Value = CollectivePublicKeyShare;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        let qr = parameters.poly_ctx(&PolyType::Qr, 0);
+        let share = proto::Poly::try_from_with_context(&value.0, &qr);
+
+        proto::CollectivePublicKeyShare { share: Some(share) }
+    }
+}
+
+impl TryFromWithParameters for CollectivePublicKeyShare {
+    type Parameters = BfvParameters;
+    type Value = proto::CollectivePublicKeyShare;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        let qr = parameters.poly_ctx(&PolyType::Qr, 0);
+        let poly = Poly::try_from_with_context(&value.share.as_ref().unwrap(), &qr);
+
+        CollectivePublicKeyShare(poly)
+    }
+}
+
+// CollectiveDecryptionShare //
+impl TryFromWithLevelledParameters for proto::CollectiveDecryptionShare {
+    type Parameters = BfvParameters;
+    type Value = CollectiveDecryptionShare;
+
+    fn try_from_with_levelled_parameters(
+        value: &Self::Value,
+        parameters: &Self::Parameters,
+        level: usize,
+    ) -> Self {
+        let q = parameters.poly_ctx(&PolyType::Q, level);
+        let share = proto::Poly::try_from_with_context(&value.0, &q);
+        proto::CollectiveDecryptionShare { share: Some(share) }
+    }
+}
+
+impl TryFromWithLevelledParameters for CollectiveDecryptionShare {
+    type Parameters = BfvParameters;
+    type Value = proto::CollectiveDecryptionShare;
+
+    fn try_from_with_levelled_parameters(
+        value: &Self::Value,
+        parameters: &Self::Parameters,
+        level: usize,
+    ) -> Self {
+        let q = parameters.poly_ctx(&PolyType::Q, level);
+        let poly = Poly::try_from_with_context(value.share.as_ref().unwrap(), &q);
+
+        CollectiveDecryptionShare(poly)
+    }
+}
+
+// Relinerization procedure //
+// CollectiveRlkShare1 //
+impl TryFromWithParameters for proto::CollectiveRlkShare1 {
+    type Parameters = BfvParameters;
+    type Value = CollectiveRlkShare1;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        let qp_ctx = parameters.poly_ctx(&PolyType::QP, 0);
+        let polys = value
+            .0
+            .iter()
+            .flat_map(|p_vec| {
+                p_vec
+                    .iter()
+                    .map(|p| proto::Poly::try_from_with_context(p, &qp_ctx))
+                    .collect_vec()
+            })
+            .collect_vec();
+
+        proto::CollectiveRlkShare1 { shares: polys }
+    }
+}
+
+impl TryFromWithParameters for CollectiveRlkShare1 {
+    type Parameters = BfvParameters;
+    type Value = proto::CollectiveRlkShare1;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        let qp_ctx = parameters.poly_ctx(&PolyType::QP, 0);
+
+        let dnum = parameters.dnum.unwrap();
+        assert!(
+            value.shares.len() == 2 * dnum,
+            "Not enough shares in CollectiveRlkShare1"
+        );
+
+        let h0s = value.shares[..dnum]
+            .iter()
+            .map(|p| Poly::try_from_with_context(p, &qp_ctx))
+            .collect_vec();
+
+        let h1s = value.shares[dnum..]
+            .iter()
+            .map(|p| Poly::try_from_with_context(p, &qp_ctx))
+            .collect_vec();
+
+        CollectiveRlkShare1([h0s, h1s])
+    }
+}
+
+// CollectiveRlkShare2 //
+impl TryFromWithParameters for proto::CollectiveRlkShare2 {
+    type Parameters = BfvParameters;
+    type Value = CollectiveRlkShare2;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        assert!(
+            value.0.len() == parameters.dnum.unwrap(),
+            "Polys in collective share 2 are do not equal decomposition count (i.e. dnum)"
+        );
+
+        let qp_ctx = parameters.poly_ctx(&PolyType::QP, 0);
+        let shares = value
+            .0
+            .iter()
+            .map(|p| proto::Poly::try_from_with_context(p, &qp_ctx))
+            .collect_vec();
+
+        proto::CollectiveRlkShare2 { shares }
+    }
+}
+impl TryFromWithParameters for CollectiveRlkShare2 {
+    type Parameters = BfvParameters;
+    type Value = proto::CollectiveRlkShare2;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        assert!(
+            value.shares.len() == parameters.dnum.unwrap(),
+            "Polys in collective share 2 are do not equal decomposition count (i.e. dnum)"
+        );
+
+        let qp_ctx = parameters.poly_ctx(&PolyType::QP, 0);
+        let polys = value
+            .shares
+            .iter()
+            .map(|p| Poly::try_from_with_context(p, &qp_ctx))
+            .collect_vec();
+
+        CollectiveRlkShare2(polys)
+    }
+}
+
+// CollectiveRlkAggTrimmedShare1 //
+impl TryFromWithParameters for proto::CollectiveRlkAggTrimmedShare1 {
+    type Parameters = BfvParameters;
+    type Value = CollectiveRlkAggTrimmedShare1;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        assert!(
+            value.0.len() == parameters.dnum.unwrap(),
+            "Polys do not equal decomposition count (i.e. dnum)"
+        );
+
+        let qp_ctx = parameters.poly_ctx(&PolyType::QP, 0);
+        let shares = value
+            .0
+            .iter()
+            .map(|p| {
+                let mut p = p.clone();
+                qp_ctx.change_representation(&mut p, Representation::Coefficient);
+                proto::Poly::try_from_with_context(&p, &qp_ctx)
+            })
+            .collect_vec();
+
+        proto::CollectiveRlkAggTrimmedShare1 { shares }
+    }
+}
+
+impl TryFromWithParameters for CollectiveRlkAggTrimmedShare1 {
+    type Parameters = BfvParameters;
+    type Value = proto::CollectiveRlkAggTrimmedShare1;
+
+    fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self {
+        assert!(
+            value.shares.len() == parameters.dnum.unwrap(),
+            "Polys do not equal decomposition count (i.e. dnum)"
+        );
+
+        let qp_ctx = parameters.poly_ctx(&PolyType::QP, 0);
+        let polys = value
+            .shares
+            .iter()
+            .map(|p| {
+                let mut p = Poly::try_from_with_context(p, &qp_ctx);
+                qp_ctx.change_representation(&mut p, Representation::Evaluation);
+                p
+            })
+            .collect_vec();
+
+        CollectiveRlkAggTrimmedShare1(polys)
+    }
+}
+
 mod tests {
     use super::*;
-    use crate::{Encoding, Evaluator, SecretKey};
+    use crate::{
+        CollectivePublicKeyGenerator, CollectiveRlkGenerator, Encoding, Evaluator, Plaintext,
+        SecretKey, CRS,
+    };
     use prost::Message;
-    use rand::thread_rng;
+    use rand::{thread_rng, RngCore};
 
     #[test]
     fn serialize_and_deserialize_secret_key() {
@@ -482,5 +730,234 @@ mod tests {
         let ek_back = EvaluationKey::try_from_with_parameters(&ek_proto, &params);
 
         assert_eq!(ek, ek_back);
+    }
+
+    #[test]
+    fn serialize_and_deserialize_public_key() {
+        let mut rng = thread_rng();
+        let params = BfvParameters::default(2, 1 << 4);
+
+        let sk = SecretKey::random(params.degree, params.hw, &mut rng);
+        let pk = PublicKey::new(&params, &sk, &mut rng);
+
+        let pk_proto = proto::PublicKey::try_from_with_parameters(&pk, &params);
+        let pk_back = PublicKey::try_from_with_parameters(&pk_proto, &params);
+
+        assert_eq!(pk, pk_back);
+    }
+
+    #[test]
+    fn serialize_and_deserialize_multi_party_bfv() {
+        pub struct PartySecret {
+            secret: SecretKey,
+        }
+
+        fn gen_crs() -> CRS {
+            let mut rng = thread_rng();
+            let mut seed = [0u8; 32];
+            rng.fill_bytes(&mut seed);
+            seed
+        }
+
+        fn setup_parties(params: &BfvParameters, n: usize) -> Vec<PartySecret> {
+            let mut rng = thread_rng();
+            (0..n)
+                .into_iter()
+                .map(|_| {
+                    let sk = SecretKey::random_with_params(params, &mut rng);
+                    PartySecret { secret: sk }
+                })
+                .collect_vec()
+        }
+
+        let no_of_parties = 10;
+        let params = BfvParameters::default(3, 1 << 8);
+        let level = 0;
+        let parties = setup_parties(&params, no_of_parties);
+
+        // Generate collective public key //
+        let mut rng = thread_rng();
+        let crs_cpk = gen_crs();
+        let shares = parties
+            .iter()
+            .map(|party_i| {
+                CollectivePublicKeyGenerator::generate_share(
+                    &params,
+                    &party_i.secret,
+                    crs_cpk,
+                    &mut rng,
+                )
+            })
+            .collect_vec();
+        let collective_public_key =
+            CollectivePublicKeyGenerator::aggregate_shares_and_finalise(&params, &shares, crs_cpk);
+
+        // test serialize/deserialize collective public key
+        {
+            let serialized =
+                proto::PublicKey::try_from_with_parameters(&collective_public_key, &params);
+            let deserialized = PublicKey::try_from_with_parameters(&serialized, &params);
+
+            assert_eq!(&collective_public_key, &deserialized);
+        }
+
+        // Generate RLK //
+
+        // initialise state
+        let mut rng = thread_rng();
+        let collective_rlk_state = parties
+            .iter()
+            .map(|party_i| CollectiveRlkGenerator::init_state(&params, &mut rng))
+            .collect_vec();
+
+        // Generate and collect h0s and h1s
+        let crs_rlk = gen_crs();
+        let mut collective_rlk_share1 = izip!(parties.iter(), collective_rlk_state.iter())
+            .map(|(party_i, state_i)| {
+                CollectiveRlkGenerator::generate_share_1(
+                    &params,
+                    &party_i.secret,
+                    state_i,
+                    crs_rlk,
+                    level,
+                    &mut rng,
+                )
+            })
+            .collect_vec();
+
+        // test deserilisation/serilisation of collective_rlk_share1
+        collective_rlk_share1.iter().for_each(|c| {
+            // serialize
+            let serialized = proto::CollectiveRlkShare1::try_from_with_parameters(c, &params);
+
+            // deserialize
+            let deserialized = CollectiveRlkShare1::try_from_with_parameters(&serialized, &params);
+
+            assert_eq!(c, &deserialized);
+        });
+
+        // aggregate h0s and h1s
+        let collective_rlk_agg_share1 =
+            CollectiveRlkGenerator::aggregate_shares_1(&params, &collective_rlk_share1, level);
+
+        // Generate and collect h'0s h'1s
+        let collective_rlk_share2 = izip!(parties.iter(), collective_rlk_state.iter())
+            .map(|(party_i, state_i)| {
+                CollectiveRlkGenerator::generate_share_2(
+                    &params,
+                    &party_i.secret,
+                    &collective_rlk_agg_share1,
+                    state_i,
+                    level,
+                    &mut rng,
+                )
+            })
+            .collect_vec();
+
+        // test deserilisation/serilisation of collective_rlk_share2
+        collective_rlk_share2.iter().for_each(|c| {
+            // serialize
+            let serialized = proto::CollectiveRlkShare2::try_from_with_parameters(c, &params);
+
+            // deserialize
+            let deserialized = CollectiveRlkShare2::try_from_with_parameters(&serialized, &params);
+
+            assert_eq!(c, &deserialized);
+        });
+
+        // trim collective rlk aggregated share 1
+        let collective_rlk_agg_trimmed_share1 = collective_rlk_agg_share1.trim();
+
+        // test deserilisation/serilisation of collective_rlk_agg_trimmed_share1
+        {
+            let serialized = proto::CollectiveRlkAggTrimmedShare1::try_from_with_parameters(
+                &collective_rlk_agg_trimmed_share1,
+                &params,
+            );
+            let deserialized =
+                CollectiveRlkAggTrimmedShare1::try_from_with_parameters(&serialized, &params);
+
+            assert_eq!(&collective_rlk_agg_trimmed_share1, &deserialized);
+        }
+
+        // aggregate h'0s and h'1s
+        let rlk = CollectiveRlkGenerator::aggregate_shares_2(
+            &params,
+            &collective_rlk_share2,
+            collective_rlk_agg_trimmed_share1,
+            level,
+        );
+
+        // test deserilisation/serilisation of rilinearization key
+        {
+            let serialized = proto::RelinearizationKey::try_from_with_parameters(&rlk, &params);
+            let deserialized = RelinearizationKey::try_from_with_parameters(&serialized, &params);
+
+            assert_eq!(&rlk, &deserialized);
+        }
+
+        // Encryt two plaintexts
+        let mut rng = thread_rng();
+        let m0 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+        let m1 = params
+            .plaintext_modulus_op
+            .random_vec(params.degree, &mut rng);
+        let pt0 = Plaintext::encode(&m0, &params, Encoding::default());
+        let pt1 = Plaintext::encode(&m1, &params, Encoding::default());
+        let ct0 = collective_public_key.encrypt(&params, &pt0, &mut rng);
+        let ct1 = collective_public_key.encrypt(&params, &pt1, &mut rng);
+
+        // multiply ciphertexts
+        let evaluation_key = EvaluationKey::new_raw(&[0], vec![rlk], &[], &[], vec![]);
+        let evaluator = Evaluator::new(params);
+        let ct0c1 = evaluator.mul(&ct0, &ct1);
+        let ct_out = evaluator.relinearize(&ct0c1, &evaluation_key);
+
+        // Collective decryption
+        let collective_decryption_shares = parties
+            .iter()
+            .map(|party_i| {
+                CollectiveDecryption::generate_share(
+                    evaluator.params(),
+                    &ct_out,
+                    &party_i.secret,
+                    &mut rng,
+                )
+            })
+            .collect_vec();
+
+        {
+            collective_decryption_shares.iter().for_each(|share| {
+                let serialized =
+                    proto::CollectiveDecryptionShare::try_from_with_levelled_parameters(
+                        share,
+                        evaluator.params(),
+                        0,
+                    );
+                let deserialized = CollectiveDecryptionShare::try_from_with_levelled_parameters(
+                    &serialized,
+                    evaluator.params(),
+                    level,
+                );
+
+                assert_eq!(share, &deserialized);
+            });
+        }
+
+        let m0m1: Vec<u64> = CollectiveDecryption::aggregate_share_and_decrypt(
+            evaluator.params(),
+            &ct_out,
+            &collective_decryption_shares,
+        )
+        .decode(Encoding::default(), evaluator.params());
+        let mut m0m1_expected = m0;
+        evaluator
+            .params()
+            .plaintext_modulus_op
+            .mul_mod_fast_vec(&mut m0m1_expected, &m1);
+
+        assert_eq!(m0m1, m0m1_expected);
     }
 }

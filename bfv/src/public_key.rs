@@ -2,6 +2,7 @@ use crate::{BfvParameters, Ciphertext, Plaintext, Poly, PolyType, Representation
 use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct PublicKey {
     pub(crate) c0: Poly,
     pub(crate) c1: Poly,

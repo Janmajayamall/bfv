@@ -1,5 +1,8 @@
 syntax = "proto3";
 
+package my.bfv;
+
+
 message Poly { 
     repeated bytes coefficients = 1; 
 }
@@ -41,3 +44,34 @@ message EvaluationKey {
     repeated GaloisKey rtgs = 2;
     repeated int32 rot_indices = 3;
 }
+
+message PublicKey { 
+    Poly c0 = 1;
+    bytes seed = 2;
+}
+
+// Multiparty BFV Start //
+message CollectivePublicKeyShare { 
+    Poly share = 1;
+}
+
+message CollectiveDecryptionShare { 
+    Poly share = 1;
+}
+
+message CollectiveRlkShare1 {
+    repeated Poly shares = 1;
+}
+
+message CollectiveRlkShare2 {
+    repeated Poly shares = 1;
+}
+
+message CollectiveRlkAggTrimmedShare1 { 
+    repeated Poly shares = 1;
+}
+
+message CollectiveRlkAggShare2 { 
+    repeated Poly shares = 1;
+}
+// Multiparty BFV End //

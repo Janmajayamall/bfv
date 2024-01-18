@@ -24,6 +24,17 @@ pub trait TryFromWithParameters: Sized {
     fn try_from_with_parameters(value: &Self::Value, parameters: &Self::Parameters) -> Self;
 }
 
+pub trait TryFromWithLevelledParameters: Sized {
+    type Value;
+    type Parameters;
+
+    fn try_from_with_levelled_parameters(
+        value: &Self::Value,
+        parameters: &Self::Parameters,
+        level: usize,
+    ) -> Self;
+}
+
 pub trait TryEncodingWithParameters<V>: Sized {
     type Parameters;
     type Encoding;

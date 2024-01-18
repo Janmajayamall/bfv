@@ -6,9 +6,11 @@ use itertools::{izip, Itertools};
 use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-type CRS = [u8; 32];
+pub type CRS = [u8; 32];
 
 pub struct CollectivePublicKeyGenerator {}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectivePublicKeyShare(pub(crate) Poly);
 
 impl CollectivePublicKeyGenerator {
     pub fn generate_share<R: CryptoRng + RngCore>(
@@ -16,7 +18,7 @@ impl CollectivePublicKeyGenerator {
         sk: &SecretKey,
         crs: CRS,
         rng: &mut R,
-    ) -> Poly {
+    ) -> CollectivePublicKeyShare {
         let qr = params.poly_ctx(&PolyType::Qr, 0);
 
         // sample common reference polynomial for cpk `c1`
@@ -26,27 +28,32 @@ impl CollectivePublicKeyGenerator {
         let mut s = qr.try_convert_from_i64_small(&sk.coefficients, Representation::Coefficient);
         qr.change_representation(&mut s, Representation::Evaluation);
 
-        // s_i*c1 + e_i
+        // s_i * -c1 + e_i
         qr.mul_assign(&mut s, &c1);
         let mut e = qr.random_gaussian(Representation::Coefficient, params.variance, rng);
         qr.change_representation(&mut e, Representation::Evaluation);
         qr.add_assign(&mut s, &e);
 
-        s
+        qr.change_representation(&mut s, Representation::Coefficient);
+
+        CollectivePublicKeyShare(s)
     }
 
     pub fn aggregate_shares_and_finalise(
         params: &BfvParameters,
-        shares: &[Poly],
+        shares: &[CollectivePublicKeyShare],
         crs: CRS,
     ) -> PublicKey {
         let qr = params.poly_ctx(&PolyType::Qr, 0);
 
-        let mut sum = shares[0].clone();
+        let mut sum = shares[0].0.clone();
         shares
             .iter()
             .skip(1)
-            .for_each(|share_i| qr.add_assign(&mut sum, &share_i));
+            .for_each(|share_i| qr.add_assign(&mut sum, &share_i.0));
+
+        // In public key both c0s and c1s are assumed to be in evaluation representation
+        qr.change_representation(&mut sum, Representation::Evaluation);
 
         // generate c1 (TODO: is this necessary?)
         let mut crs_prng = ChaCha8Rng::from_seed(crs);
@@ -62,13 +69,16 @@ impl CollectivePublicKeyGenerator {
 }
 pub struct CollectiveDecryption();
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectiveDecryptionShare(pub(crate) Poly);
+
 impl CollectiveDecryption {
     pub fn generate_share<R: CryptoRng + RngCore>(
         params: &BfvParameters,
         ct: &Ciphertext,
         sk: &SecretKey,
         rng: &mut R,
-    ) -> Poly {
+    ) -> CollectiveDecryptionShare {
         assert!(
             ct.c.len() == 2,
             "For collective decryption, ciphertext must be of degree 1"
@@ -93,19 +103,19 @@ impl CollectiveDecryption {
         let e = q_ctx.random_gaussian(Representation::Coefficient, params.variance, rng);
         q_ctx.add_assign(&mut s, &e);
 
-        s
+        CollectiveDecryptionShare(s)
     }
 
     pub fn aggregate_share_and_decrypt(
         params: &BfvParameters,
         ct: &Ciphertext,
-        shares: &[Poly],
+        shares: &[CollectiveDecryptionShare],
     ) -> Plaintext {
         let q_ctx = params.poly_ctx(&PolyType::Q, ct.level());
 
-        let mut sum_of_shares = shares[0].clone();
+        let mut sum_of_shares = shares[0].0.clone();
         shares.iter().skip(1).for_each(|share_i| {
-            q_ctx.add_assign(&mut sum_of_shares, share_i);
+            q_ctx.add_assign(&mut sum_of_shares, &share_i.0);
         });
 
         // \sum s_i * c1
@@ -141,16 +151,34 @@ impl CollectiveDecryption {
     }
 }
 
-pub struct CollectiveRlkGeneratorState(pub SecretKey);
+pub type CollectiveRlkGeneratorState = SecretKey;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectiveRlkShare1(pub(crate) [Vec<Poly>; 2]);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectiveRlkShare2(pub(crate) Vec<Poly>);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectiveRlkAggShare1((Vec<Poly>, Vec<Poly>));
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectiveRlkAggTrimmedShare1(pub(crate) Vec<Poly>);
 
 pub struct CollectiveRlkGenerator();
+
+impl CollectiveRlkAggShare1 {
+    pub fn trim(mut self) -> CollectiveRlkAggTrimmedShare1 {
+        let h1 = self.0 .1;
+        CollectiveRlkAggTrimmedShare1(h1)
+    }
+}
 
 impl CollectiveRlkGenerator {
     pub fn init_state<R: CryptoRng + RngCore>(
         params: &BfvParameters,
         rng: &mut R,
     ) -> CollectiveRlkGeneratorState {
-        CollectiveRlkGeneratorState(SecretKey::random_with_params(&params, rng))
+        SecretKey::random_with_params(&params, rng)
     }
 
     /// Generates public input vector `a` of size `dnum` polynomials with `crs` as seed.
@@ -173,14 +201,14 @@ impl CollectiveRlkGenerator {
         crs: CRS,
         level: usize,
         rng: &mut R,
-    ) -> (Vec<Poly>, Vec<Poly>) {
+    ) -> CollectiveRlkShare1 {
         let a_values = CollectiveRlkGenerator::generate_public_inputs(params, crs, level);
 
         let ksk_params = params.hybrid_key_switching_params_at_level(level);
         let qp_ctx = params.poly_ctx(&PolyType::QP, level);
 
         // ephemeral secret
-        let u_i = &state.0;
+        let u_i = &state;
 
         // `HybridKeySwitchingKey::generate_c0` expects `poly` to be multiplied with in key switching to have context of ciphertext polynomial at level
         let q_ctx = params.poly_ctx(&PolyType::Q, level);
@@ -189,7 +217,7 @@ impl CollectiveRlkGenerator {
         q_ctx.change_representation(&mut s_i_poly, Representation::Evaluation);
 
         // [h_{0,i}]
-        let h0s = HybridKeySwitchingKey::generate_c0(
+        let mut h0s = HybridKeySwitchingKey::generate_c0(
             &qp_ctx,
             &a_values,
             &ksk_params.g,
@@ -198,6 +226,8 @@ impl CollectiveRlkGenerator {
             params.variance,
             rng,
         );
+        h0s.iter_mut()
+            .for_each(|v| qp_ctx.change_representation(v, Representation::Coefficient));
 
         // [h_{1,i}]
         // [s_i]_QP (TODO: Since QP is union of Q and P, we are unecessarily reducing s_i coefficients by prime q_0, ... q_{l-1} twice)
@@ -213,47 +243,52 @@ impl CollectiveRlkGenerator {
                     qp_ctx.random_gaussian(Representation::Coefficient, params.variance, rng);
                 qp_ctx.change_representation(&mut e, Representation::Evaluation);
                 qp_ctx.add_assign(&mut tmp, &e);
+
+                qp_ctx.change_representation(&mut tmp, Representation::Coefficient);
+
                 tmp
             })
             .collect_vec();
 
-        (h0s, h1s)
+        CollectiveRlkShare1([h0s, h1s])
     }
 
     pub fn aggregate_shares_1(
         params: &BfvParameters,
-        h0s: &[Vec<Poly>],
-        h1s: &[Vec<Poly>],
+        share1s: &[CollectiveRlkShare1],
         level: usize,
-    ) -> (Vec<Poly>, Vec<Poly>) {
+    ) -> CollectiveRlkAggShare1 {
         let qp_ctx = params.poly_ctx(&PolyType::QP, level);
 
-        let mut h0_agg = h0s[0].to_owned();
-        h0s.iter().skip(1).for_each(|shares_i| {
-            izip!(h0_agg.iter_mut(), shares_i.iter()).for_each(|(s0, s1)| {
+        let mut h0_agg = share1s[0].0[0].to_owned();
+        let mut h1_agg = share1s[0].0[1].to_owned();
+        share1s.iter().skip(1).for_each(|shares_i| {
+            izip!(h0_agg.iter_mut(), &shares_i.0[0]).for_each(|(s0, s1)| {
+                qp_ctx.add_assign(s0, s1);
+            });
+            izip!(h1_agg.iter_mut(), &shares_i.0[1]).for_each(|(s0, s1)| {
                 qp_ctx.add_assign(s0, s1);
             });
         });
 
-        let mut h1_agg = h1s[0].to_owned();
-        h1s.iter().skip(1).for_each(|shares_i| {
-            izip!(h1_agg.iter_mut(), shares_i.iter()).for_each(|(s0, s1)| {
-                qp_ctx.add_assign(s0, s1);
-            });
-        });
+        h0_agg
+            .iter_mut()
+            .for_each(|v| qp_ctx.change_representation(v, Representation::Evaluation));
+        h1_agg
+            .iter_mut()
+            .for_each(|v| qp_ctx.change_representation(v, Representation::Evaluation));
 
-        (h0_agg, h1_agg)
+        CollectiveRlkAggShare1((h0_agg, h1_agg))
     }
 
     pub fn generate_share_2<R: CryptoRng + RngCore>(
         params: &BfvParameters,
         sk: &SecretKey,
-        h0_agg: &[Poly],
-        h1_agg: &[Poly],
+        agg_share1s: &CollectiveRlkAggShare1,
         state: &CollectiveRlkGeneratorState,
         level: usize,
         rng: &mut R,
-    ) -> (Vec<Poly>, Vec<Poly>) {
+    ) -> CollectiveRlkShare2 {
         let qp_ctx = params.poly_ctx(&PolyType::QP, level);
 
         let mut s_i =
@@ -261,10 +296,10 @@ impl CollectiveRlkGenerator {
         qp_ctx.change_representation(&mut s_i, Representation::Evaluation);
 
         let mut u_i =
-            qp_ctx.try_convert_from_i64_small(&state.0.coefficients, Representation::Coefficient);
+            qp_ctx.try_convert_from_i64_small(&state.coefficients, Representation::Coefficient);
         qp_ctx.change_representation(&mut u_i, Representation::Evaluation);
 
-        let (h0_dash, h1_dash): (Vec<Poly>, Vec<Poly>) = izip!(h0_agg.iter(), h1_agg.iter())
+        let h_dash = izip!(agg_share1s.0 .0.iter(), agg_share1s.0 .1.iter())
             .map(|(h0, h1)| {
                 // h1'_i = (u_i - s_i) * \sum h1_i + e_2
                 let mut h1_dash_i = qp_ctx.sub(&u_i, &s_i);
@@ -281,40 +316,42 @@ impl CollectiveRlkGenerator {
                 qp_ctx.change_representation(&mut e_1, Representation::Evaluation);
                 qp_ctx.add_assign(&mut h0_dash_i, &e_1);
 
-                (h0_dash_i, h1_dash_i)
-            })
-            .unzip();
+                qp_ctx.add_assign(&mut h0_dash_i, &h1_dash_i);
 
-        (h0_dash, h1_dash)
+                qp_ctx.change_representation(&mut h0_dash_i, Representation::Coefficient);
+
+                h0_dash_i
+            })
+            .collect_vec();
+
+        CollectiveRlkShare2(h_dash)
     }
 
     pub fn aggregate_shares_2(
         params: &BfvParameters,
-        h0_dash_shares: &[Vec<Poly>],
-        h1_dash_shares: &[Vec<Poly>],
-        h1_agg: Vec<Poly>,
+        share2s: &[CollectiveRlkShare2],
+        h1_agg: CollectiveRlkAggTrimmedShare1,
         level: usize,
     ) -> RelinearizationKey {
         let qp_ctx = params.poly_ctx(&PolyType::QP, level);
 
         // h0'+h1'
-        let mut h0_dash_h1_dash_agg = h0_dash_shares[0].to_owned();
-        h0_dash_shares.iter().skip(1).for_each(|shares_i| {
-            izip!(h0_dash_h1_dash_agg.iter_mut(), shares_i.iter()).for_each(|(s0, s1)| {
+        let mut h0_dash_h1_dash_agg = share2s[0].0.to_owned();
+        share2s.iter().skip(1).for_each(|shares_i| {
+            izip!(h0_dash_h1_dash_agg.iter_mut(), shares_i.0.iter()).for_each(|(s0, s1)| {
                 qp_ctx.add_assign(s0, s1);
             });
         });
-        h1_dash_shares.iter().for_each(|shares_i| {
-            izip!(h0_dash_h1_dash_agg.iter_mut(), shares_i.iter()).for_each(|(s0, s1)| {
-                qp_ctx.add_assign(s0, s1);
-            });
-        });
+
+        h0_dash_h1_dash_agg
+            .iter_mut()
+            .for_each(|v| qp_ctx.change_representation(v, Representation::Evaluation));
 
         RelinearizationKey {
             ksk: HybridKeySwitchingKey {
                 seed: None,
                 c0s: h0_dash_h1_dash_agg.into_boxed_slice(),
-                c1s: h1_agg.into_boxed_slice(),
+                c1s: h1_agg.0.into_boxed_slice(),
             },
             level,
         }
@@ -580,7 +617,7 @@ mod tests {
     #[test]
     fn collective_rlk_key_generation_works() {
         let no_of_parties = 10;
-        let params = BfvParameters::default(3, 1 << 15);
+        let params = BfvParameters::default(3, 1 << 8);
         let level = 0;
         let parties = setup_parties(&params, no_of_parties);
 
@@ -595,49 +632,46 @@ mod tests {
 
         // Generate and collect h0s and h1s
         let crs = gen_crs();
-        let mut h0s = vec![];
-        let mut h1s = vec![];
-        izip!(parties.iter(), collective_rlk_state.iter()).for_each(|(party_i, state_i)| {
-            let (h0_i, h1_i) = CollectiveRlkGenerator::generate_share_1(
-                &params,
-                &party_i.secret,
-                state_i,
-                crs,
-                level,
-                &mut rng,
-            );
-            h0s.push(h0_i);
-            h1s.push(h1_i);
-        });
+        let mut collective_rlk_share1 = izip!(parties.iter(), collective_rlk_state.iter())
+            .map(|(party_i, state_i)| {
+                CollectiveRlkGenerator::generate_share_1(
+                    &params,
+                    &party_i.secret,
+                    state_i,
+                    crs,
+                    level,
+                    &mut rng,
+                )
+            })
+            .collect_vec();
 
         // aggregate h0s and h1s
-        let (h0s_agg, h1s_agg) = CollectiveRlkGenerator::aggregate_shares_1(
-            &params,
-            h0s.as_slice(),
-            h1s.as_slice(),
-            level,
-        );
+        let collective_rlk_agg_share1 =
+            CollectiveRlkGenerator::aggregate_shares_1(&params, &collective_rlk_share1, level);
 
         // Generate and collect h'0s h'1s
-        let mut h_dash_0s = vec![];
-        let mut h_dash_1s = vec![];
-        izip!(parties.iter(), collective_rlk_state.iter()).for_each(|(party_i, state_i)| {
-            let (h_dash_0_i, h_dash_1_i) = CollectiveRlkGenerator::generate_share_2(
-                &params,
-                &party_i.secret,
-                &h0s_agg,
-                &h1s_agg,
-                state_i,
-                level,
-                &mut rng,
-            );
-            h_dash_0s.push(h_dash_0_i);
-            h_dash_1s.push(h_dash_1_i);
-        });
+        let collective_rlk_share2 = izip!(parties.iter(), collective_rlk_state.iter())
+            .map(|(party_i, state_i)| {
+                CollectiveRlkGenerator::generate_share_2(
+                    &params,
+                    &party_i.secret,
+                    &collective_rlk_agg_share1,
+                    state_i,
+                    level,
+                    &mut rng,
+                )
+            })
+            .collect_vec();
+
+        // trim collective rlk aggregated share 1
+        let collective_rlk_agg_trimmed_share1 = collective_rlk_agg_share1.trim();
 
         // aggregate h'0s and h'1s
         let rlk = CollectiveRlkGenerator::aggregate_shares_2(
-            &params, &h_dash_0s, &h_dash_1s, h1s_agg, level,
+            &params,
+            &collective_rlk_share2,
+            collective_rlk_agg_trimmed_share1,
+            level,
         );
 
         // Generate public key //

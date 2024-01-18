@@ -19,7 +19,14 @@ mod utils;
 mod proto;
 #[cfg(feature = "serialize")]
 pub use proto::proto::{
-    Ciphertext as CiphertextProto, EvaluationKey as EvaluationKeyProto, SecretKey as SecretKeyProto,
+    Ciphertext as CiphertextProto, CollectiveDecryptionShare as CollectiveDecryptionShareProto,
+    CollectivePublicKeyShare as CollectivePublicKeyShareProto,
+    CollectiveRlkAggShare2 as CollectiveRlkAggShare2Proto,
+    CollectiveRlkAggTrimmedShare1 as CollectiveRlkAggTrimmedShare1Proto,
+    CollectiveRlkShare1 as CollectiveRlkShare1Proto,
+    CollectiveRlkShare2 as CollectiveRlkShare2Proto, EvaluationKey as EvaluationKeyProto,
+    GaloisKey as GaloisKeyProto, PublicKey as PublicKeyProto,
+    RelinearizationKey as RelinearizationKeyProto, SecretKey as SecretKeyProto,
 };
 
 pub use ciphertext::*;
