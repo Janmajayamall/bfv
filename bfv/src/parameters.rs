@@ -147,20 +147,42 @@ where
             .log2() as usize
     }
 
-    /// creates new bfv parameteres with necessary values
     pub fn new(
         ciphertext_moduli_sizes: &[usize],
         plaintext_modulus: u64,
         degree: usize,
     ) -> BfvParameters<T> {
-        assert!(degree.is_power_of_two() && degree >= 16);
-
         // generate Q moduli chain
         let ciphertext_moduli = generate_primes_vec(ciphertext_moduli_sizes, degree, &[]);
 
         // generate P moduli chain
         let extension_moduli =
             generate_primes_vec(ciphertext_moduli_sizes, degree, &ciphertext_moduli);
+
+        BfvParameters::<T>::new_with_primes(
+            ciphertext_moduli,
+            extension_moduli,
+            plaintext_modulus,
+            degree,
+        )
+    }
+
+    /// Creates new bfv parameteres with primes for ciphertext moduli and extension moduli
+    ///
+    /// Bits in ciphertext moduli must equal bits in extension moduli
+    pub fn new_with_primes(
+        ciphertext_moduli: Vec<u64>,
+        extension_moduli: Vec<u64>,
+        plaintext_modulus: u64,
+        degree: usize,
+    ) -> BfvParameters<T> {
+        assert_eq!(ciphertext_moduli.len(), extension_moduli.len());
+        assert!(degree.is_power_of_two() && degree >= 16);
+
+        let ciphertext_moduli_sizes = ciphertext_moduli
+            .iter()
+            .map(|p| (64 - p.leading_zeros()) as usize)
+            .collect_vec();
 
         // moduli ops
         let ciphertext_moduli_ops = ciphertext_moduli
@@ -543,7 +565,7 @@ where
             extension_moduli_ops,
             ciphertext_ntt_ops,
             extension_ntt_ops,
-            ciphertext_moduli_sizes: ciphertext_moduli_sizes.to_vec(),
+            ciphertext_moduli_sizes,
             max_level: q_size - 1,
             q_size,
             p_size,
@@ -621,7 +643,15 @@ where
     }
 
     pub fn enable_hybrid_key_switching(&mut self, specialp_bits: &[usize]) {
-        let alpha = specialp_bits.len();
+        let special_moduli =
+            generate_primes_vec(specialp_bits, self.degree, &self.ciphertext_moduli);
+
+        self.enable_hybrid_key_switching_with_prime(special_moduli);
+    }
+
+    /// None of primes in `special_moduli` must be in `ciphertext_moduli`
+    pub fn enable_hybrid_key_switching_with_prime(&mut self, special_moduli: Vec<u64>) {
+        let alpha = special_moduli.len();
         // Figure 1 of https://homomorphicencryption.org/wp-content/uploads/2020/12/wahc20_demo_christian.pdf shows that key switching throughput and key switching size does not increase, decrease respecticely for alpha > 4.
         assert!(
             alpha <= 4,
@@ -629,8 +659,6 @@ where
         );
 
         let dnum = (self.ciphertext_moduli.len() as f64 / alpha as f64).ceil() as usize;
-        let special_moduli =
-            generate_primes_vec(specialp_bits, self.degree, &self.ciphertext_moduli);
         let special_moduli_ops = special_moduli
             .iter()
             .map(|pj| Modulus::new(*pj))

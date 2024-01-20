@@ -72,12 +72,4 @@ pub fn primitive_element(p: u64, n: usize) -> Option<u64> {
 //TODO: write tests for the above functions
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn generate_prime_works() {
-        let prime = generate_prime(51, 1 << 15, 1 << 51);
-        dbg!(prime);
-    }
-}
+mod tests {}

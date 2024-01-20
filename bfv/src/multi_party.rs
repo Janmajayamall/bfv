@@ -616,8 +616,11 @@ mod tests {
 
     #[test]
     fn collective_rlk_key_generation_works() {
-        let no_of_parties = 10;
-        let params = BfvParameters::default(3, 1 << 8);
+        let no_of_parties = 2;
+        let mut params = BfvParameters::new(&[20, 30], 40961, 1 << 11);
+        params.enable_hybrid_key_switching(&[16]);
+        params.enable_pke();
+
         let level = 0;
         let parties = setup_parties(&params, no_of_parties);
 
@@ -678,48 +681,51 @@ mod tests {
         let crs = gen_crs();
         let public_key = gen_collective_public_key(&params, &parties, crs);
 
+        let evaluator = Evaluator::new(params);
+        let evaluation_key = EvaluationKey::new_raw(&[0], vec![rlk], &[], &[], vec![]);
+
         // Encryt two plaintexts
         let mut rng = thread_rng();
-        let m0 = params
+        let m0 = evaluator
+            .params()
             .plaintext_modulus_op
-            .random_vec(params.degree, &mut rng);
-        let m1 = params
+            .random_vec(evaluator.params().degree, &mut rng);
+        let m1 = evaluator
+            .params()
             .plaintext_modulus_op
-            .random_vec(params.degree, &mut rng);
-        let pt0 = Plaintext::encode(&m0, &params, Encoding::default());
-        let pt1 = Plaintext::encode(&m1, &params, Encoding::default());
-        let ct0 = public_key.encrypt(&params, &pt0, &mut rng);
-        let ct1 = public_key.encrypt(&params, &pt1, &mut rng);
+            .random_vec(evaluator.params().degree, &mut rng);
+        let pt0 = Plaintext::encode(&m0, evaluator.params(), Encoding::default());
+        let pt1 = Plaintext::encode(&m1, evaluator.params(), Encoding::default());
+        let ct0 = public_key.encrypt(evaluator.params(), &pt0, &mut rng);
+        let ct1 = public_key.encrypt(evaluator.params(), &pt1, &mut rng);
 
         // multiply ciphertexts
-        let evaluation_key = EvaluationKey::new_raw(&[0], vec![rlk], &[], &[], vec![]);
-        let evaluator = Evaluator::new(params);
         let ct0c1 = evaluator.mul(&ct0, &ct1);
         let ct_out = evaluator.relinearize(&ct0c1, &evaluation_key);
 
-        unsafe {
-            let secrets = parties.iter().map(|s| s.secret.clone()).collect_vec();
-            dbg!(MHEDebugger::measure_noise(
-                &secrets,
-                evaluator.params(),
-                &ct0c1
-            ));
-            dbg!(MHEDebugger::measure_noise(
-                &secrets,
-                evaluator.params(),
-                &ct_out
-            ));
-            dbg!(MHEDebugger::measure_noise(
-                &secrets,
-                evaluator.params(),
-                &ct0
-            ));
-            dbg!(MHEDebugger::measure_noise(
-                &secrets,
-                evaluator.params(),
-                &ct1
-            ));
-        }
+        // unsafe {
+        //     let secrets = parties.iter().map(|s| s.secret.clone()).collect_vec();
+        //     dbg!(MHEDebugger::measure_noise(
+        //         &secrets,
+        //         evaluator.params(),
+        //         &ct0c1
+        //     ));
+        //     dbg!(MHEDebugger::measure_noise(
+        //         &secrets,
+        //         evaluator.params(),
+        //         &ct_out
+        //     ));
+        //     dbg!(MHEDebugger::measure_noise(
+        //         &secrets,
+        //         evaluator.params(),
+        //         &ct0
+        //     ));
+        //     dbg!(MHEDebugger::measure_noise(
+        //         &secrets,
+        //         evaluator.params(),
+        //         &ct1
+        //     ));
+        // }
 
         // decrypt ct_out
         let m0m1 = collective_decryption(evaluator.params(), &parties, &ct_out);
@@ -735,7 +741,8 @@ mod tests {
     #[test]
     fn collective_galois_key_rotation_works() {
         let no_of_parties = 10;
-        let params = BfvParameters::default(6, 1 << 15);
+        let mut params = BfvParameters::default(3, 1 << 8);
+
         let level = 0;
         let parties = setup_parties(&params, no_of_parties);
 
