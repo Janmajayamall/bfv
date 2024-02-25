@@ -72,4 +72,25 @@ pub fn primitive_element(p: u64, n: usize) -> Option<u64> {
 //TODO: write tests for the above functions
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use std::primitive;
+
+    use crate::{generate_prime, generate_primes_vec, primitive_element};
+
+    #[test]
+    fn trial() {
+        let primes = generate_primes_vec(&[30], 8, &[]);
+        dbg!(primes);
+    }
+
+    #[test]
+    fn te() {
+        let mut f = vec![];
+        for i in 10..65537 {
+            if primitive_element(i, 4096).is_some() {
+                f.push(i);
+            }
+        }
+        dbg!(f);
+    }
+}

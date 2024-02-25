@@ -1,8 +1,7 @@
-// use conrete-ntt as default
 #[cfg(not(feature = "hexl-ntt"))]
-mod concrete;
+mod default;
 #[cfg(not(feature = "hexl-ntt"))]
-pub use concrete::NttOperator;
+pub use default::NttOperator;
 
 #[cfg(feature = "hexl-ntt")]
 mod hexl;

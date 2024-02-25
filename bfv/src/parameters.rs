@@ -537,7 +537,7 @@ where
             lastq_inv_modql.push(lastq_inv_modq);
         }
 
-        // To generate mapping for matrix representation index, we use: https://github.com/microsoft/SEAL/blob/82b07db635132e297282649e2ab5908999089ad2/native/src/seal/batchencoder.cpp
+        // Taken from [SEAL](https://github.com/microsoft/SEAL/blob/82b07db635132e297282649e2ab5908999089ad2/native/src/seal/batchencoder.cpp)
         let row = degree >> 1;
         let m = degree << 1;
         let gen = 3;
@@ -551,6 +551,8 @@ where
             pos *= gen;
             pos &= m - 1;
         }
+
+        dbg!(&matrix_reps_index_map);
 
         let plaintext_modulus_op = Modulus::new(plaintext_modulus);
         let plaintext_ntt_op = T::new(degree, plaintext_modulus);
@@ -1047,8 +1049,8 @@ mod tests {
     #[test]
     fn trial() {
         // dbg!(BfvParameters::v_norm(3.2, 1 << 15));
-        dbg!(BfvParameters::noise_ks(10, 3.2, 1 << 15, 60));
-        let params = BfvParameters::default(9, 1 << 15);
+        // dbg!(BfvParameters::noise_ks(10, 3.2, 1 << 4, 60));
+        let params = BfvParameters::default(9, 1 << 4);
         let sp = params.poly_ctx(&crate::PolyType::SpecialP, 0);
         dbg!(sp.big_q());
     }

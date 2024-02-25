@@ -18,7 +18,6 @@ rand_chacha = "0.3.1"
 seq-macro = "0.3"
 hexl-rs = {git = "https://github.com/Janmajayamall/hexl-rs.git", optional = true}
 prost = {version = "0.12", optional = true}
-concrete-ntt = {version= "0.1.0", default-features = false}
 getrandom = {version = "0.2.12", features = ["js"]}
 traits = {path = "./../traits"}
 prost-wkt = "0.5"
@@ -37,8 +36,7 @@ prost-wkt-build = "0.5"
 
 [features]
 default = ["std"]
-std = ["concrete-ntt/std"]
-nightly = ["concrete-ntt/nightly"]
+std = []
 hexl = ["hexl-rs"]
 hexl-ntt = ["hexl-rs"]
 serialize = ["prost", "prost-build"]

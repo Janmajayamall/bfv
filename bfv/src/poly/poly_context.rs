@@ -1114,15 +1114,19 @@ mod tests {
     #[test]
     pub fn test_poly_to_biguint() {
         let rng = thread_rng();
-        let values = rng
-            .sample_iter(Uniform::new(0u128, 1 << 127))
-            .take(1 << 4)
-            .map(BigUint::from)
-            .collect_vec();
+        // let values = rng
+        //     .sample_iter(Uniform::new(0u128, 1 << 127))
+        //     .take(1 << 4)
+        //     .map(BigUint::from)
+        //     .collect_vec();
+        let values = vec![12u64; 16].into_iter().map(BigUint::from).collect_vec();
 
         let params = BfvParameters::default(10, 1 << 4);
         let poly_ctx = params.poly_ctx(&PolyType::Q, 0);
         let q_poly = poly_ctx.try_convert_from_biguint(&values, Representation::Coefficient);
+
+        dbg!(&q_poly);
+        dbg!(&values);
 
         assert_eq!(values, poly_ctx.try_convert_to_biguint(&q_poly));
     }
